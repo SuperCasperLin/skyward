@@ -1,0 +1,8 @@
+# Shell scripts and Rust sources are checked out with LF everywhere: build.sh
+# runs under bash on Windows and on Linux, and a stray CR breaks it.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ttf binary
+*.img binary
+*.sha256 text eol=lf
