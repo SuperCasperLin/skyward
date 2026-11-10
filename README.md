@@ -14,9 +14,10 @@ recovery 变成**原生支持 data 解密**的 Skyward。
 
 | | |
 |---|---|
-| 当前版本 | `SW-v0.2.0-nuwa-v0.2.0`（上游基线 v0.2.0，本移植第 2 版） |
+| 当前版本 | `SW-v0.2.0-nuwa-v0.2.1`（上游基线 v0.2.0，本移植第 3 版） |
 | 适用机型 | 小米 13 Pro（`nuwa`），已验证 OS3.0.312.0.WMBCNXM / Android 16 / SDK 36 |
 | 系统要求 | 已解锁 Bootloader；A/B 分区；独立 `recovery` 分区 |
+| 移植 | Lin Zixi |
 | 许可 | GPL-3.0（与上游一致） |
 | 更新日志 | [CHANGELOG.md](CHANGELOG.md) |
 
@@ -41,7 +42,8 @@ recovery 镜像当底座**——保留原厂的 init、adbd、SELinux 策略和�
 | **日志导出** | `[wipe].logs`，让「导出日志」能选内部分区 | 同上 |
 | **息屏显示 AOD** | 屏幕熄灭后以 2% 背光显示时间、日期、电量，每分钟换一个位置防烧屏，轻触唤醒 | `crates/skyward-ui` |
 | **大写锁定** | 双击 Shift 锁定大写（再双击解除），锁定态 Shift 键多一条横杠 | `crates/skyward-ui` |
-| **版本号** | About 页显示 `SW-v0.2.0-nuwa-v0.2.0`；更新检查仍用上游版本号 | `crates/skyward-info` |
+| **版本号** | About 页显示 `SW-v0.2.0-nuwa-v0.2.1`；更新检查仍用上游版本号 | `crates/skyward-info` |
+| **署名** | About 页在原作者之下加一行移植署名；许可页加「修改说明」（原作者版权行不改动） | `crates/skyward-ui` |
 | **Windows 构建** | 两处可移植性补丁，见 [docs/PATCHES.md](docs/PATCHES.md) | `crates/skyward-bootimg`、`crates/skyward-config` |
 
 上游 `nuwa.toml` 本来就有，但**只有 3 个服务、没有 TEE 链**，所以官方发布的 nuwa 包
@@ -98,6 +100,7 @@ fastboot reboot recovery
 
 - `SW-v0.2.0-nuwa-v0.1.0` —— 第一版：打通 TEE 链，data 可解密
 - `SW-v0.2.0-nuwa-v0.2.0` —— 第二版：加 AOD、大写锁定、版本号
+- `SW-v0.2.0-nuwa-v0.2.1` —— 第三版（修订）：署名与修改声明
 
 上游发新版后重新定基，编号随之变成 `SW-v0.3.0-nuwa-v0.1.0` 这样的形式，一眼能看出
 基于哪个上游、自己改到第几轮。
@@ -115,15 +118,21 @@ fastboot reboot recovery
 本项目与上游同为 **GPL-3.0**，见 [LICENSE](LICENSE)。修改部分已在
 [CHANGELOG.md](CHANGELOG.md) 与 [docs/PATCHES.md](docs/PATCHES.md) 中标明。
 
-- [kirklin/skyward](https://github.com/kirklin/skyward) —— 上游，本移植的全部基础
+- [kirklin/skyward](https://github.com/kirklin/skyward) —— 上游，本移植的全部基础；
+  Skyward © 2026 Kirk Lin
+- nuwa 移植与本文档 © 2026 Lin Zixi，按 GPL-3.0 发布
 - MiSans 字体（小米）、KirkMono 字体，见 `upstream/resources/fonts/`
+
+About 页的署名也按同样的顺序排列：`© 2026 Kirk Lin` 在上，`nuwa port © 2026 Lin Zixi`
+在下。原作者的版权行在任何情况下都不删除——这是 GPL-3 的保留声明要求，也是本移植
+唯一无法「改」的地方。
 
 ---
 
 ## English
 
 A third-party port of [kirklin/skyward](https://github.com/kirklin/skyward) for the
-Xiaomi 13 Pro (`nuwa`), version `SW-v0.2.0-nuwa-v0.2.0`.
+Xiaomi 13 Pro (`nuwa`), version `SW-v0.2.0-nuwa-v0.2.1`.
 
 Skyward reuses the stock recovery image as a substrate — keeping its init, adbd, SELinux
 policy and vendor `.so` files — and replaces only `system/bin/recovery` with a Rust program
@@ -133,4 +142,4 @@ always-on clock and caps-lock on the on-screen keyboard.
 
 Build with `bash build.sh`; the image lands in `upstream/target/out/<VERSION>/`. See
 [docs/BUILD.md](docs/BUILD.md) and [docs/FLASH.md](docs/FLASH.md) (Chinese).
-Licensed GPL-3.0, as upstream.
+Licensed GPL-3.0, as upstream. Skyward © 2026 Kirk Lin; nuwa port © 2026 Lin Zixi.

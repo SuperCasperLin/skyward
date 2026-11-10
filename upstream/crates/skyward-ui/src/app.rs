@@ -1505,6 +1505,8 @@ pub struct HeroArt {
     pub wordmark: Sprite,
     pub version: Sprite,
     pub author: Sprite,
+    /// The port's own line, under the author's.
+    pub port: Sprite,
     pub runs: Vec<Vec<Run>>,
 }
 
@@ -4543,8 +4545,8 @@ impl App {
 
         if let Some(art) = &frame.hero {
             // The field fills the screen and fades as the page scrolls; the
-            // cards scroll over it. The version and the author's line fade
-            // and shrink away first, then the wordmark.
+            // cards scroll over it. The version, the author's line and the
+            // port's line fade and shrink away first, then the wordmark.
             let glow = self.glow.as_ref().expect("the About page keeps its field");
             let fade = (1.0 - scroll / m.dp(ABOUT_FIELD_DP)).clamp(0.0, 1.0);
             let top = (widgets::bar_bottom(t) + m.dp(ABOUT_FIELD_DP)) / m.h as f32;
@@ -4556,6 +4558,7 @@ impl App {
             let v = (scroll / range).clamp(0.0, 1.0);
             art.version.draw_scaled(out, 0.0, 0.0, 1.0 - 0.1 * v, t.hero.version, 1.0 - v);
             art.author.draw_scaled(out, 0.0, 0.0, 1.0 - 0.1 * v, t.hero.version, 1.0 - v);
+            art.port.draw_scaled(out, 0.0, 0.0, 1.0 - 0.1 * v, t.hero.version, 1.0 - v);
             let l = ((scroll - range) / m.dp(ABOUT_LOGO_FADE_DP)).clamp(0.0, 1.0);
             glow::ink_wordmark(out, &field, &glow.look().ink, &art.wordmark, 1.0 - 0.1 * l, 1.0 - l, fade, dither);
         } else {

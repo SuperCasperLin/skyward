@@ -2212,9 +2212,19 @@ pub fn version_line(t: &Theme, f: &Fonts, text: &str) -> Sprite {
 /// How far below the version, in dp, the author's line stands.
 const AUTHOR_BELOW_DP: f32 = 19.0;
 
+/// How far below the version, in dp, the line naming the port stands: one
+/// line lower than the author's, in the same type.
+const PORT_BELOW_DP: f32 = 36.5;
+
 /// Who made the recovery, a line under the version in its type.
 pub fn author_line(t: &Theme, f: &Fonts, text: &str) -> Sprite {
     hero_line(t, f, text, t.m.dp(AUTHOR_BELOW_DP))
+}
+
+/// Who ported it to this device, under the author's line. GPL-3 keeps the
+/// original notice in place; this one is added below it, not over it.
+pub fn port_line(t: &Theme, f: &Fonts, text: &str) -> Sprite {
+    hero_line(t, f, text, t.m.dp(PORT_BELOW_DP))
 }
 
 /// A line centred under the About wordmark in the version's type, `below`

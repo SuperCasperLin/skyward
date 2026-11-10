@@ -526,6 +526,11 @@ pub fn mount(cx: &Ctx) -> Frame {
 /// Who made the recovery, as the About page names them under its version.
 const AUTHOR: &str = "© 2026 Kirk Lin";
 
+/// Who ported it to this device, named under the author's line. GPL-3 keeps
+/// the original notice in place, so this one is added below it rather than
+/// over it.
+const PORT: &str = "nuwa port © 2026 Lin Zixi";
+
 /// About this device, modelled on the stock「我的设备」: the wordmark, the
 /// version and its author over a moving colour field, and the summary,
 /// hardware and link cards scrolling over it. Only the cards are drawn
@@ -543,6 +548,7 @@ pub fn about(cx: &Ctx) -> Frame {
         wordmark: widgets::wordmark(t, f, "Skyward", m.dp(233.7), m.dp(37.8)),
         version: widgets::version_line(t, f, VERSION),
         author: widgets::author_line(t, f, AUTHOR),
+        port: widgets::port_line(t, f, PORT),
         runs: canvas.runs(),
     };
     Frame { header: false, hero: Some(art), ..Frame::new(t, canvas, out, cx.state.lang.pick(ABOUT), summary_top) }
@@ -3545,6 +3551,23 @@ You should have received a copy of the GNU General Public License along with thi
 
 const LICENSE_TERMS: Text = ["许可证", "授權條款", "License"];
 
+/// What this port changed, in the words GPL-3 asks a modified version to
+/// carry: whose it is, and what was done to it.
+const MODIFIED: Text = ["修改说明", "修改說明", "Changes"];
+
+/// The words the licence gives for a program's notice, under their own
+/// heading so they are not read as part of the port's own note.
+const NOTICE: Text = ["声明", "聲明", "Notice"];
+
+const MODIFIED_NOTE: Text = [
+    "本移植基于 Skyward 0.2.0，为小米 13 Pro（nuwa）修改。修改部分 Copyright (C) 2026 Lin Zixi。\n\n\
+改动：补充 nuwa 所需的 TEE 服务链，使 /data 可以解密；新增息屏显示；屏幕键盘支持双击锁定大写。完整记录见项目仓库的 CHANGELOG 与 docs/PATCHES.md。",
+    "本移植基於 Skyward 0.2.0，為小米 13 Pro（nuwa）修改。修改部分 Copyright (C) 2026 Lin Zixi。\n\n\
+改動：補充 nuwa 所需的 TEE 服務鏈，使 /data 可以解密；新增息屏顯示；螢幕鍵盤支援雙擊鎖定大寫。完整記錄見專案倉庫的 CHANGELOG 與 docs/PATCHES.md。",
+    "This port is a modified version of Skyward 0.2.0 for the Xiaomi 13 Pro (nuwa). Modifications Copyright (C) 2026 Lin Zixi.\n\n\
+The changes: the TEE service chain nuwa needs for /data to decrypt, an always-on clock, and caps lock on the on-screen keyboard. The full record is in the project's CHANGELOG and docs/PATCHES.md.",
+];
+
 /// Skyward's own licence.
 pub fn license(cx: &Ctx) -> Frame {
     let (t, f, l) = (cx.t, cx.f, cx.state.lang);
@@ -3556,14 +3579,19 @@ pub fn license(cx: &Ctx) -> Frame {
         "GNU General Public License, version 3 or later (GPL-3.0-or-later)",
     ]);
     let y = widgets::info_card(&mut c, t, f, top, &[(l.pick(LICENSE_TERMS), terms.to_string())]);
+    // Above the original notice, the port says whose build this is and what
+    // it changed; the notice below stays exactly as upstream wrote it.
+    let y = widgets::section(&mut c, t, f, y, l.pick(MODIFIED));
+    let y = widgets::paragraph(&mut c, t, f, y - t.m.dp(16.0), l.pick(MODIFIED_NOTE));
+    let y = widgets::section(&mut c, t, f, y, l.pick(NOTICE));
     let bottom = match l {
         Lang::Hans | Lang::Hant => {
             let notice = if l == Lang::Hans { LICENSE_NOTICE[0] } else { LICENSE_NOTICE[1] };
-            let y = widgets::paragraph(&mut c, t, f, y + t.m.dp(4.0), notice);
+            let y = widgets::paragraph(&mut c, t, f, y - t.m.dp(16.0), notice);
             let y = widgets::section(&mut c, t, f, y, "原文");
             widgets::paragraph(&mut c, t, f, y - t.m.dp(16.0), LICENSE_ORIGINAL)
         }
-        Lang::En => widgets::paragraph(&mut c, t, f, y + t.m.dp(4.0), LICENSE_ORIGINAL),
+        Lang::En => widgets::paragraph(&mut c, t, f, y - t.m.dp(16.0), LICENSE_ORIGINAL),
     };
     Frame::new(t, fit(c, t, bottom), Vec::new(), l.pick(LICENSE), top)
 }

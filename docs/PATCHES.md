@@ -1,8 +1,8 @@
 # 对上游源码的改动
 
 本移植**不修改** Skyward 的架构与逻辑，绝大多数差异都在配置（`devices/nuwa.toml`）。
-源码层面只有两类改动：为了在 Windows 上构建的两处可移植性补丁，以及两个新功能
-（息屏显示、大写锁定）。下面逐条列出，便于对照上游 diff。
+源码层面只有四类改动：为了在 Windows 上构建的两处可移植性补丁、两个新功能
+（息屏显示、大写锁定）、版本号拆分，以及署名。下面逐条列出，便于对照上游 diff。
 
 ## 一、可移植性补丁（两处）
 
@@ -76,13 +76,27 @@ Shifted                     -> Letters     （单击取消一次性大写）
 
 ```rust
 pub const UPSTREAM: &str = env!("CARGO_PKG_VERSION");   // 0.2.0，更新检查用这个
-pub const PORT: &str = "0.2.0";                         // 本移植的第几版
-pub const VERSION: &str = concat!("SW-v", env!("CARGO_PKG_VERSION"), "-nuwa-v0.2.0");
+pub const PORT: &str = "0.2.1";                         // 本移植的第几版
+pub const VERSION: &str = concat!("SW-v", env!("CARGO_PKG_VERSION"), "-nuwa-v0.2.1");
 ```
 
 `VERSION` 只用于展示（About 页、MTP 设备名、内核日志）；`crates/skyward/src/updates.rs`
 里三处调用改用 `UPSTREAM`，因为 GitHub 上只有上游的 release，复合版本号既解析不了也不该
 被拿去比较。
+
+## 四、署名（`crates/skyward-ui`）
+
+上游的 About 页在版本号下面有一行作者：`© 2026 Kirk Lin`。本移植在它**下面**加一行
+自己的署名，原行一字未改——GPL-3 要求保留原版权声明，追加而不是替换。
+
+| 文件 | 改动 |
+|---|---|
+| `widgets.rs` | 新增 `port_line()` 与 `PORT_BELOW_DP`(36.5)；`author_line()` 与它共用 `hero_line()`，只是垂直位置不同 |
+| `app.rs` | `HeroArt` 新增 `port` 字段，与 `author` 一同绘制、一同随滚动淡出缩放 |
+| `pages.rs` | 新增 `PORT` 常量 `nuwa port © 2026 Lin Zixi`；许可页在原文之上新增「修改说明」段（中/繁/英），写明修改部分版权与三处改动 |
+
+许可页那段是 GPL-3 第 5(a) 条对修改版本的要求：显著声明改动过、以及改动的时间。它放在
+「原文」段（`LICENSE_ORIGINAL`）之前，原文本身不动。
 
 ## 与其它移植版本的关系
 

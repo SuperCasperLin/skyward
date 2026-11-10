@@ -40,7 +40,7 @@ bash build.sh
 产物：
 
 ```
-upstream/target/out/SW-v0.2.0-nuwa-v0.2.0/
+upstream/target/out/SW-v0.2.0-nuwa-v0.2.1/
 ├── skyward-nuwa.img
 └── skyward-nuwa.img.sha256
 ```
