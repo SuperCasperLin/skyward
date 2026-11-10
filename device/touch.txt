@@ -1,0 +1,4 @@
+/sys/class/touch:
+total 0
+lrwxrwxrwx 1 root root 0 2026-11-10 16:44 touch_dev -> ../../devices/virtual/touch/touch_dev
+lrwxrwxrwx 1 root root 0 2026-11-10 17:13 tp_dev -> ../../devices/virtual/touch/tp_dev

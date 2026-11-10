@@ -1,0 +1,74 @@
+# 更新日志
+
+本项目的版本号为 `SW-v<上游基线>-nuwa-v<本移植版本>`。格式参考
+[Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
+
+## [SW-v0.2.0-nuwa-v0.2.0] — 2026-11-10
+
+第二版。在第一版「能解密」的基础上补齐可用性：熄屏后不再黑屏、键盘能锁大写、
+镜像开始按版本号交付。
+
+### 新增
+
+- **息屏显示（AOD）**：屏幕按设定的息屏时间熄灭后，面板不关断，而是把背光从熄灭瞬间的
+  亮度平滑降到 2%，显示时间、日期、电量，并在底部 8 秒内提示「轻触屏幕唤醒」。
+  - 位置每分钟在四个点之间轮换（±8 dp 内），避免 OLED 长时间点亮同一批像素。
+  - 轻触任意位置唤醒；这一下触摸被吞掉，不会误点到页面上。
+  - 设置 → 亮度 下新增「息屏显示」开关，写入 `/metadata/skyward/settings.json`。
+  - 电量数字用开关/滑条同款强调蓝（`#5488F8`），其余文字为灰阶。
+- **大写锁定**：屏幕键盘的 Shift 键双击（400 ms 内）锁定大写，再双击解除；锁定期间
+  连续输入保持大写，Shift 键在实心箭头下多一条横杠表示锁定。三处键盘（文本框、
+  文件编辑器、终端）行为一致。
+
+### 变更
+
+- **版本号**：About 页显示 `SW-v0.2.0-nuwa-v0.2.0`（`skyward_info::VERSION`）。
+  版本号拆成两部分：`UPSTREAM` 是上游基线（`0.2.0`），`PORT` 是本移植版本（`0.2.0`）。
+  更新检查仍向上游问「有没有比 `0.2.0` 更新的 release」，用的是 `UPSTREAM`，
+  不受复合版本号影响。
+- **构建产物**：`build.sh` 从 `VERSION` 文件读版本号，输出到
+  `upstream/target/out/<VERSION>/`，并生成同名 `.sha256`。
+- 息屏亮度渐变的计算方向改为「以熄灭瞬间的亮度为起点降到 AOD 亮度」，消除 f32 累加误差
+  （原写法在满亮度时得到 `0.099999994` 而不是 `0.1`）。
+
+### 修复
+
+- 上一版引入 AOD 后，5 个既有测试用例仍按「熄屏后面板关闭」断言，已失效。现在这些用例
+  显式关闭 AOD 以保留「面板真的熄灭」这条路径的覆盖，另新增
+  `the_panel_holds_the_always_on_clock_after_it_goes_off` 覆盖默认 AOD 路径。
+
+### 验证
+
+- 全量 UI 测试在真机上跑（测试二进制交叉编译为 aarch64，`SKYWARD_FONT_DIR` 指向设备上的
+  字体目录）：**335 通过 / 1 无法运行**（该用例需读取源码树扫描界面文案）。
+- 真机：15 s 无操作后背光 227 → 41（≈2%），AOD 亮起；注入轻触后回到 227，页面无穿透点击。
+- 镜像 sha256 `a432cb572b29355c481f2750c58091aef9060943970266f271a7c56f8aa3b213`。
+
+## [SW-v0.2.0-nuwa-v0.1.0] — 2026-11-10
+
+第一版。移植打通，data 可解密。
+
+### 新增
+
+- `devices/nuwa.toml`：在上游 152 行的基础上新增 76 行。
+  - 服务从 3 个补到 8 个，新增 `qseecomd`、`keymint-service-qti`、`hwservicemanager`、
+    `gatekeeper@1.0-service-qti`、`boot@1.2-service`，把 KeyMint → TEE 这条链拉起来。
+  - `[backup].efs`：`modemst1`、`modemst2`、`fsg`、`fsc`、`persist` 五个分区。
+  - `[wipe].logs`：日志导出可选内部分区。
+- 两处 Windows 构建补丁（见 [docs/PATCHES.md](docs/PATCHES.md)），使打包器与配置校验
+  能在非 Linux 主机上编译。
+
+### 验证
+
+- data 解密：TEE 链 6 个服务全部起来，`/data` 以 f2fs 读写挂载，识别出 0/10/999 三个用户；
+  密码错误时报 `the secure world does not recognise that credential`。
+- Wi-Fi：WPA3/SAE 连接成功，拿到 IPv4 与 IPv6。
+- 备份：89 MB，`modemst1` 的 SHA-256 与清单一致。
+- 对照实验：刷入上游官方 nuwa 包，能启动、Wi-Fi 可用，但 `/data` 不挂载、只有一个
+  service description 发布（本移植是两个），确认差异确实来自配置层。
+- 镜像 sha256 `a5eacd16…`（前 8 位；该文件随后被第二版构建覆盖，未归档）。
+
+## 关于上游基线
+
+两版都基于上游 `kirklin/skyward` **v0.2.0**（tag 与 `main` 在源码层无差异）。
+上游此后若有新版本，本项目的编号会变成 `SW-v<新版本>-nuwa-v0.1.0` 重新计数。

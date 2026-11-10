@@ -1,0 +1,16 @@
+# Build output: the toolchain, cargo's target dirs, the images themselves.
+/tools/
+/upstream/target/
+/build/
+/logs/
+/out/
+
+# Reference material: other people's repositories and dumped OTA images.
+/refs/
+
+# Local project data.
+/.workbuddy/
+
+# Images are delivered as release assets, not in the tree.
+*.img
+*.img.sha256

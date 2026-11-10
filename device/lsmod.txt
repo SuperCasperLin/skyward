@@ -1,0 +1,404 @@
+Module                  Size  Used by
+kiwi_v2             12378112  0 
+msm_drm              3407872  37 
+qdss_bridge            32768  0 
+ipanetm                16384  0 
+machine_dlkm          122880  0 
+ipa_clientsm          274432  0 
+rndisipam              73728  1 ipa_clientsm
+lpass_cdc_va_macro_dlkm    86016  0 
+coresight_tmc          98304  0 
+usb_f_qdss             36864  8 qdss_bridge,coresight_tmc
+usb_f_gsi             110592  8 
+lpass_cdc_wsa2_macro_dlkm   143360  0 
+lpass_cdc_wsa_macro_dlkm   147456  0 
+lpass_cdc_rx_macro_dlkm   155648  1 machine_dlkm
+camera               6479872  33 
+rmnet_offload          32768  0 
+msm_eva               454656  0 
+rmnet_shs             221184  0 
+pinctrl_lpi_dlkm       32768  7 
+swr_dmic_dlkm          28672  0 
+mhi_dev_uci            32768  0 
+wcd938x_dlkm          225280  3 machine_dlkm,swr_dmic_dlkm
+mbhc_dlkm              90112  1 wcd938x_dlkm
+mhi_dev_satellite      28672  0 
+bt_fm_slim             32768  1 
+wsa884x_dlkm          118784  1 machine_dlkm
+wsa883x_dlkm           77824  1 machine_dlkm
+mhi_dev_netdev         36864  0 
+mhi_cntrl_qcom         49152  0 
+mac80211             1323008  0 
+mi_thermal_interface    40960  0 
+qcom_hv_haptics       131072  1 
+ipam                 4292608  25 ipanetm,ipa_clientsm,rndisipam
+mhi_dev_dtr            20480  1 mhi_dev_uci
+coresight_replicator    24576  0 
+sys_pm_vx              24576  0 
+qcom_spmi_adc5_gen3    36864  0 
+swr_ctrl_dlkm          86016  4 lpass_cdc_va_macro_dlkm,lpass_cdc_wsa2_macro_dlkm,lpass_cdc_wsa_macro_dlkm,lpass_cdc_rx_macro_dlkm
+lpass_cdc_tx_macro_dlkm   102400  1 mbhc_dlkm
+adsp_loader_dlkm       16384  0 
+wcd9xxx_dlkm           36864  21 wcd938x_dlkm
+btpower                36864  1 bt_fm_slim
+audio_pkt_dlkm         28672  2 
+audio_prm_dlkm         20480  2 machine_dlkm,wcd9xxx_dlkm
+lpass_cdc_dlkm         90112  7 machine_dlkm,lpass_cdc_va_macro_dlkm,lpass_cdc_wsa2_macro_dlkm,lpass_cdc_wsa_macro_dlkm,lpass_cdc_rx_macro_dlkm,lpass_cdc_tx_macro_dlkm
+spf_core_dlkm          24576  7 machine_dlkm,pinctrl_lpi_dlkm,swr_ctrl_dlkm,adsp_loader_dlkm,audio_pkt_dlkm,audio_prm_dlkm,lpass_cdc_dlkm
+gpr_dlkm               28672  3 audio_pkt_dlkm,audio_prm_dlkm,spf_core_dlkm
+cnss2                 499712  1 kiwi_v2
+fts_touch_spi         339968  0 
+msm_kgsl             1957888  35 
+wlan_firmware_service    73728  1 cnss2,[permanent]
+q6_notifier_dlkm       32768  3 pinctrl_lpi_dlkm,audio_prm_dlkm,gpr_dlkm
+msm_video             696320  0 
+cnss_prealloc          16384  1 kiwi_v2
+qrtr_mhi               20480  0 
+millet_binder          28672  0 [permanent]
+leds_qti_flash         40960  1 camera
+mhi                   151552  9 qdss_bridge,mhi_dev_uci,mhi_dev_satellite,mhi_dev_netdev,mhi_cntrl_qcom,ipam,mhi_dev_dtr,cnss2,qrtr_mhi
+cnss_nl                20480  1 kiwi_v2
+cnss_plat_ipc_qmi_svc    36864  1 cnss2
+cnss_utils             32768  3 kiwi_v2,btpower,cnss2
+coresight_stm          40960  0 
+qrtr_smd               16384  0 
+qcedev_mod_dlkm        53248  0 
+coresight_cti          73728  0 
+fsa4480_i2c            20480  3 msm_drm,machine_dlkm,mbhc_dlkm
+swr_haptics_dlkm       28672  1 
+stm_nfc_i2c            40960  0 
+coresight_hwevent      16384  0 
+radio_i2c_rtc6226_qca    53248  0 
+nxp_nci                49152  1 
+slim_qcom_ngd_ctrl     61440  0 
+qcrypto_msm_dlkm      110592  0 
+charger_ulog_glink     24576  0 
+rmnet_wlan             69632  0 
+rmnet_perf             16384  0 
+rmnet_perf_tether      20480  0 
+ucsi_glink             28672  1 fsa4480_i2c
+spmi_glink_debug       16384  0 
+altmode_glink          24576  1 msm_drm
+qti_battery_debug      24576  0 
+qti_battery_charger   167936  4 mi_thermal_interface,qcom_hv_haptics,leds_qti_flash,swr_haptics_dlkm
+frpc_adsprpc          417792  7 msm_eva
+pmic_glink             28672  6 charger_ulog_glink,ucsi_glink,spmi_glink_debug,altmode_glink,qti_battery_debug,qti_battery_charger
+q6_pdr_dlkm            16384  1 q6_notifier_dlkm
+qcom_q6v5_pas          57344  4 
+coresight_tgu          16384  0 [permanent]
+memlat_scmi            16384  0 
+wcd938x_slave_dlkm     28672  0 
+coresight_remote_etm    16384  0 
+sla                    32768  0 
+kunit                  49152  0 
+stm_ftrace             16384  0 
+snd_soc_hdmi_codec     24576  0 
+hardwareinfo           16384  0 
+msm_hw_fence          143360  1 msm_drm
+rmnet_sch              20480  0 
+stm_st54se_gpio        16384  0 
+rmnet_aps              24576  0 
+wcd_core_dlkm          45056  9 machine_dlkm,lpass_cdc_va_macro_dlkm,lpass_cdc_wsa2_macro_dlkm,lpass_cdc_wsa_macro_dlkm,lpass_cdc_rx_macro_dlkm,wcd938x_dlkm,mbhc_dlkm,wsa884x_dlkm,wsa883x_dlkm
+stm_console            16384  0 
+gsim                  299008  1 ipam
+coresight_tpda         24576  0 
+stm_p_basic            16384  0 
+stm_p_ost              16384  0 
+qrtr_gunyah            24576  0 
+dwc3_msm              118784  4 msm_drm,usb_f_qdss,usb_f_gsi
+xiaomi_touch           90112  4 fts_touch_spi
+q6_dlkm                16384  0 
+cfg80211             1470464  2 kiwi_v2,mac80211
+minet                  40960  0 
+millet_pkg             20480  0 
+qcom_esoc             102400  1 mhi_cntrl_qcom
+coresight_tpdm        102400  0 
+mtdblock               16384  0 
+msm_memshare           28672  0 
+slimbus                45056  2 bt_fm_slim,slim_qcom_ngd_ctrl
+sg                     86016  0 
+qcom_vadc_common       32768  1 qcom_spmi_adc5_gen3
+coresight_csr          32768  2 coresight_tmc,coresight_hwevent
+stm_core               49152  5 coresight_stm,stm_ftrace,stm_console,stm_p_basic,stm_p_ost
+audpkt_ion_dlkm        24576  3 machine_dlkm,audio_pkt_dlkm
+boot_stats             16384  0 
+millet_sig             16384  0 [permanent]
+coresight_funnel       24576  0 
+msm_mmrm               57344  4 msm_drm,camera,msm_eva,msm_video
+cs35l43_dlkm          225280  0 
+coresight_dummy        16384  0 
+binder_gki             20480  1 millet_binder,[permanent]
+stub_dlkm              16384  1 
+cs35l41_dlkm          397312  2 
+smcinvoke_dlkm        204800  97 btpower,stm_nfc_i2c,nxp_nci
+miwill                110592  0 
+miicmpfilter           20480  0 
+sync_fence             28672  1 msm_drm
+snd_usb_audio_qmi      57344  0 
+usb_bam               131072  2 coresight_tmc,usb_f_qdss
+mi_freqwdg             45056  0 
+qcom_q6v5              98304  1 qcom_q6v5_pas
+millet_hs              16384  0 
+microdump_collector    16384  0 
+leds_qti_tri_led       20480  0 
+nvmem_qfprom           20480  0 
+hdcp_qseecom_dlkm      32768  1 msm_drm
+process_exit           16384  0 
+industrialio_buffer_cb    24576  0 
+ofpart                 16384  0 
+block2mtd              28672  0 
+qcom_edac              16384  0 
+glink_pkt              45056  2 
+gh_irq_lend            20480  1 msm_drm
+millet_oem_cgroup      16384  0 [permanent]
+mtd_blkdevs            28672  1 mtdblock
+snd_event_dlkm         20480  4 machine_dlkm,pinctrl_lpi_dlkm,lpass_cdc_dlkm,gpr_dlkm
+qcom_lpm               69632  0 [permanent]
+aw882xx_dlkm          221184  0 
+rmnet_core            364544  7 rmnet_offload,rmnet_shs,rmnet_wlan,rmnet_perf,rmnet_perf_tether,rmnet_aps
+cameralog              24576  0 
+qseecom_proxy          16384  2 hdcp_qseecom_dlkm,smcinvoke_dlkm
+rmnet_ctl              20480  1 rmnet_core
+hdmi_dlkm              32768  0 
+swr_dlkm               45056  7 swr_dmic_dlkm,wcd938x_dlkm,wsa884x_dlkm,wsa883x_dlkm,swr_ctrl_dlkm,swr_haptics_dlkm,wcd938x_slave_dlkm
+max31760_fan           24576  0 
+mtdoops                28672  0 
+icc_test               16384  0 
+qce50_dlkm            102400  2 qcedev_mod_dlkm,qcrypto_msm_dlkm
+glink_probe            20480  0 
+lt9611uxc              49152  0 
+tz_log_dlkm            28672  0 
+qcom_sysmon            32768  3 qcom_q6v5_pas,qcom_esoc,qcom_q6v5
+goodix_fod             32768  3 
+migt                  249856  1 
+qcom_cpufreq_hw_debug    16384  0 
+chipreg                16384  0 
+msm_ext_display        20480  2 msm_drm,hdmi_dlkm,[permanent]
+pdr_interface          24576  4 slim_qcom_ngd_ctrl,frpc_adsprpc,pmic_glink,q6_pdr_dlkm
+pci_msm_drv           245760  3 mhi_cntrl_qcom,cnss2,mhi
+qsee_ipc_irq_bridge    24576  0 
+fpc1555                32768  0 
+mtd                   118784  8 mtdblock,ofpart,block2mtd,mtd_blkdevs,mtdoops
+qbt_handler            45056  0 
+spi_msm_geni           57344  0 
+qti_cpufreq_cdev       16384  0 
+rproc_qcom_common      45056  14 ipam,q6_notifier_dlkm,slim_qcom_ngd_ctrl,frpc_adsprpc,pmic_glink,qcom_q6v5_pas,msm_memshare,qcom_q6v5,microdump_collector,glink_probe,qcom_sysmon,pdr_interface,pci_msm_drv,qsee_ipc_irq_bridge
+rdbg                   28672  0 
+qti_ocp_notifier       16384  0 
+millet_core            28672  8 millet_binder,millet_pkg,millet_sig,millet_hs,[permanent]
+hung_task_enh          20480  0 
+cdsp_loader            16384  0 
+eud                    24576  0 
+qcom_pon               16384  0 
+phy_qcom_ufs_qmp_v4_kona    20480  0 
+ehset                  16384  0 
+smp2p_sleepstate       16384  0 [permanent]
+heap_mem_ext_v01       16384  1 msm_memshare
+subsystem_sleep_stats    28672  1 sys_pm_vx
+phy_msm_m31_eusb2      24576  0 
+repeater_qti_pmic_eusb2    28672  1 
+repeater_i2c_eusb2     16384  0 
+memlat_vendor          28672  1 
+bcl_soc                16384  0 
+phy_msm_ssusb_qmp      24576  2 
+pmic_pon_log           24576  0 
+hid_xbox_haptics_mi    16384  0 
+qcom_smd               36864  1 rproc_qcom_common
+ipa_fmwk              163840  6 ipa_clientsm,rndisipam,usb_f_gsi,ipam,rmnet_core,rmnet_ctl
+sdpm_clk               16384  0 
+phy_msm_snps_eusb2     32768  2 
+phy_qcom_emu           16384  0 
+cpu_voltage_cooling    16384  0 
+memlat                 61440  1 memlat_scmi,[permanent]
+phy_qcom_ufs_qmp_v4_waipio    20480  0 
+usb_f_diag             40960  6 
+qcom_pil_info          16384  1 qcom_q6v5_pas
+core_hang_detect       20480  0 
+rq_stats               16384  0 [permanent]
+qti_qmi_cdev           28672  0 
+nb7vpq904m             40960  0 
+smp2p                  28672  0 
+qcom_ramdump           16384  4 cnss2,frpc_adsprpc,qcom_q6v5_pas,microdump_collector
+ir_spi                 24576  0 
+sysmon_subsystem_stats    28672  0 
+usb_f_ccid             40960  2 
+qcom_iommu_debug       65536  0 
+coresight             102400  13 coresight_tmc,msm_kgsl,coresight_replicator,coresight_stm,coresight_cti,coresight_hwevent,coresight_tgu,coresight_remote_etm,coresight_tpda,coresight_tpdm,coresight_csr,coresight_funnel,coresight_dummy
+panel_event_notifier    16384  5 msm_drm,mi_thermal_interface,fts_touch_spi,qti_battery_charger,fpc1555
+qti_userspace_cdev     16384  0 
+mi_cnss_statistic      16384  1 kiwi_v2
+sps_drv               229376  3 coresight_tmc,usb_bam,qce50_dlkm
+mi_log                 28672  0 
+msm_performance        49152  1 msm_kgsl,[permanent]
+i2c_msm_geni           53248  0 
+msm_show_epoch         16384  0 [permanent]
+cpufreq_stats_scmi     16384  0 
+usbmon                 57344  0 
+qcom_glink_smem        16384  2 glink_probe,rproc_qcom_common
+qcom_spmi_temp_alarm    24576  0 
+msm_gpi                65536  2 
+reboot_mode            16384  1 qcom_pon
+pm8941_pwrkey          20480  2 msm_drm,mtdoops
+msm_geni_serial       106496  0 
+qti_devfreq_cdev       16384  0 
+policy_engine          16384  0 
+soc_sleep_stats        24576  1 subsystem_sleep_stats
+pwm_qti_lpg            36864  4 leds_qti_tri_led
+pinctrl_spmi_gpio      45056  7 
+mi_mempool             36864  0 
+msm_lmh_dcvs           24576  0 [permanent]
+xlogchar               24576  0 
+mi_exception_log      122880  0 
+phy_qcom_ufs_qmp_v4_khaje    20480  0 
+spmi_pmic_arb_debug    16384  0 
+phy_qcom_ufs_qmp_v4    20480  0 
+debugcc_kalama         32768  0 [permanent]
+bam_dma                40960  0 
+qcom_glink             61440  5 qrtr_smd,msm_memshare,glink_probe,rproc_qcom_common,qcom_glink_smem
+rimps_log              28672  0 [permanent]
+i3c_master_msm_geni    61440  0 
+repeater               16384  4 phy_msm_m31_eusb2,repeater_qti_pmic_eusb2,repeater_i2c_eusb2,phy_msm_snps_eusb2
+qcom_va_minidump       24576  6 kiwi_v2,msm_drm,camera,ipam,msm_kgsl,gsim
+phy_generic            20480  0 
+gh_tlmm_vm_mem_access    16384  0 
+redriver               20480  2 dwc3_msm,nb7vpq904m
+f_fs_ipc_log           53248  0 
+ddr_cdev               16384  0 
+qti_qmi_sensor_v2      28672  0 
+qti_fixed_regulator    16384  0 
+synx_driver            94208  4 camera,msm_eva
+cpufreq_stats_vendor    16384  1 
+gh_mem_notifier        16384  2 msm_drm,gh_tlmm_vm_mem_access
+gpucc_kalama           28672  7 
+phy_qcom_ufs_qmp_v4_lahaina    20480  0 
+qcom_ipc_lite          16384  1 synx_driver
+cpq                    40960  1 
+adsp_sleepmon          45056  1 
+binder_prio            16384  0 
+qcom_cpuss_sleep_stats    20480  0 
+usb_f_cdev             49152  7 
+hvc_gunyah             24576  0 
+msm_sharedmem          16384  1 
+dmesg_dumper           24576  0 
+cdsprm                 45056  0 
+qmi_helpers            28672  14 ipam,cnss2,wlan_firmware_service,cnss_plat_ipc_qmi_svc,slim_qcom_ngd_ctrl,coresight_remote_etm,msm_memshare,snd_usb_audio_qmi,rmnet_core,qcom_sysmon,pdr_interface,heap_mem_ext_v01,qti_qmi_cdev,qti_qmi_sensor_v2
+pinctrl_spmi_mpp       28672  0 
+msm_show_resume_irq    20480  0 [permanent]
+msm_sysstats           32768  0 
+swinfo                 61440  0 
+debug_ext              36864  0 
+bootinfo               16384  0 
+qrng_dlkm              16384  0 
+low_free_memory_kill    24576  0 
+dump_display           16384  0 [permanent]
+mi_power               36864  1 subsystem_sleep_stats
+zram                   77824  2 
+zsmalloc               57344  1 zram
+perf_helper           626688  0 
+extend_reclaim         16384  0 
+mi_memory              32768  0 
+nvme                   65536  0 
+nvme_core             151552  1 nvme
+bcl_pmic5              24576  0 
+hwid                   20480  4 kiwi_v2,camera,cnss2,repeater_qti_pmic_eusb2
+c1dcvs_scmi            24576  0 
+c1dcvs_vendor          20480  1 
+qcom_rimps             16384  2 
+sdhci_msm              81920  0 
+mem_offline            45056  0 
+arm_smmu              180224  54 
+ufs_qcom            23486464  34 mi_memory
+ufshcd_crypto_qti      16384  1 ufs_qcom
+msm_qmp                28672  6 
+qcom_aoss              36864  105 qcom_q6v5_pas,msm_qmp
+stub_regulator         16384  0 
+socinfo                69632  3 msm_kgsl,frpc_adsprpc,hwid
+rtc_pm8xxx             24576  1 
+qrtr                   49152  635 qrtr_mhi,qrtr_smd,qrtr_gunyah
+qcom_reboot_reason     16384  1 ufs_qcom
+spmi_pmic_arb          57344  1 msm_drm
+qcom_spmi_pmic         20480  0 
+regmap_spmi            20480  1 qcom_spmi_pmic
+qti_regmap_debugfs     28672  7 wcd938x_dlkm,wsa884x_dlkm,wsa883x_dlkm,lpass_cdc_dlkm,fsa4480_i2c,repeater_i2c_eusb2,qcom_spmi_pmic
+pmu_scmi               16384  0 
+pmu_vendor             16384  1 
+qcom_iommu_util        94208  7 msm_drm,coresight_tmc,camera,msm_kgsl,ipam,qcom_iommu_debug,arm_smmu,[permanent]
+qcom_logbuf_vh         16384  0 
+debug_symbol           16384  1 qcom_logbuf_vh,[permanent]
+qcom_dload_mode        20480  0 
+phy_qcom_ufs_qrbtc_sdm845    16384  0 
+phy_qcom_ufs_qmp_v4_kalama    24576  1 
+phy_qcom_ufs           32768  8 phy_qcom_ufs_qmp_v4_kona,phy_qcom_ufs_qmp_v4_waipio,phy_qcom_ufs_qmp_v4_khaje,phy_qcom_ufs_qmp_v4,phy_qcom_ufs_qmp_v4_lahaina,ufs_qcom,phy_qcom_ufs_qrbtc_sdm845,phy_qcom_ufs_qmp_v4_kalama
+nvmem_qcom_spmi_sdam    16384  7 
+ns                     40960  1 qrtr
+qnoc_crow             167936  0 
+qnoc_kalama           274432  0 [permanent]
+qnoc_qos               16384  2 qnoc_crow,qnoc_kalama
+pinctrl_kalama        118784  25 
+pinctrl_crow          102400  0 
+pinctrl_msm            53248  85 msm_drm,wcd_core_dlkm,i3c_master_msm_geni,gh_tlmm_vm_mem_access,sdhci_msm,pinctrl_kalama,pinctrl_crow
+memory_dump_v2         28672  1 cnss2
+mem_buf                45056  0 
+qcom_dma_heaps         94208  156 mem_buf,[permanent]
+msm_dma_iommu_mapping    28672  2 msm_drm,qcom_dma_heaps
+mem_buf_msgq           28672  1 mem_buf
+mem_buf_dev           114688  10 camera,msm_eva,msm_kgsl,msm_video,qcedev_mod_dlkm,frpc_adsprpc,smcinvoke_dlkm,mem_buf,qcom_dma_heaps,mem_buf_msgq
+mem_hooks              16384  0 [permanent]
+llcc_qcom              45056  5 msm_drm,camera,msm_eva,msm_kgsl,msm_video
+iommu_logger           16384  1 arm_smmu
+gunyah                106496  1 
+mdt_loader             16384  7 camera,msm_eva,ipam,msm_kgsl,msm_video,qcom_q6v5_pas,gunyah
+secure_buffer          40960  13 msm_eva,qrtr_gunyah,msm_kgsl,frpc_adsprpc,qcom_q6v5_pas,msm_memshare,audpkt_ion_dlkm,msm_sharedmem,dmesg_dumper,qcom_iommu_util,qcom_dma_heaps,mem_buf_dev,gunyah
+gh_ctrl                20480  0 
+videocc_kalama         24576  7 
+tcsrcc_kalama          16384  4 
+dispcc_kalama          61440  20 
+dcc_v2                 49152  0 
+crypto_qti_common      16384  2 ufs_qcom,ufshcd_crypto_qti
+crypto_qti_hwkm        16384  1 crypto_qti_common
+hwkm                   16384  1 crypto_qti_hwkm
+tmecom_intf            28672  1 hwkm
+cqhci                  40960  1 sdhci_msm
+clk_dummy              16384  1 debugcc_kalama
+cpu_hotplug            16384  0 
+thermal_pause          24576  0 
+sched_walt            499712  7 qcom_lpm,migt,msm_performance,thermal_pause,[permanent]
+metis                 270336  5 msm_drm,msm_kgsl,migt,sched_walt
+mi_schedule            77824  3 migt,sched_walt,metis
+qcom_cpufreq_hw        40960  1 sched_walt
+bwmon                  61440  0 [permanent]
+mist                  106496  4 msm_kgsl,migt,memlat,bwmon
+qcom_dcvs              81920  4 msm_kgsl,memlat,bwmon,mist
+dcvs_fp                16384  1 qcom_dcvs
+qcom_pmu_lib           40960  4 memlat,msm_performance,pmu_scmi,mist
+qcom_llcc_pmu          16384  1 qcom_pmu_lib
+rpmh_regulator         32768  152 
+qcom_tsens             69632  0 
+thermal_minidump       16384  2 qcom_spmi_adc5_gen3,qcom_tsens
+qcom_pdc               24576  0 [permanent]
+qcom_ipcc              20480  8 
+camcc_kalama          110592  143 
+icc_rpmh               24576  2 qnoc_crow,qnoc_kalama
+icc_debug              16384  1 icc_rpmh
+icc_bcm_voter          28672  1 icc_rpmh,[permanent]
+gcc_kalama            106496  111 
+clk_qcom              258048  14 msm_kgsl,dwc3_msm,msm_mmrm,pci_msm_drv,debugcc_kalama,gpucc_kalama,sdhci_msm,ufs_qcom,videocc_kalama,tcsrcc_kalama,dispcc_kalama,clk_dummy,camcc_kalama,gcc_kalama
+gdsc_regulator         32768  69 clk_qcom
+debug_regulator        40960  4 qti_fixed_regulator,stub_regulator,rpmh_regulator,gdsc_regulator
+proxy_consumer         20480  3 qti_fixed_regulator,rpmh_regulator,gdsc_regulator
+clk_rpmh               53248  19 
+qcom_rpmh              73728  6 msm_drm,camera,dcvs_fp,rpmh_regulator,icc_bcm_voter,clk_rpmh,[permanent]
+cmd_db                 16384  7 msm_kgsl,cnss2,dcvs_fp,rpmh_regulator,icc_rpmh,clk_rpmh,qcom_rpmh,[permanent]
+qcom_ipc_logging       40960  53 msm_drm,ipanetm,ipa_clientsm,rndisipam,usb_f_qdss,usb_f_gsi,mhi_dev_uci,mhi_dev_satellite,mhi_dev_netdev,mhi_cntrl_qcom,ipam,mhi_dev_dtr,audio_pkt_dlkm,cnss2,mhi,cnss_plat_ipc_qmi_svc,nxp_nci,slim_qcom_ngd_ctrl,charger_ulog_glink,ucsi_glink,altmode_glink,pmic_glink,gsim,dwc3_msm,qcom_esoc,snd_usb_audio_qmi,glink_pkt,rmnet_ctl,glink_probe,pci_msm_drv,qsee_ipc_irq_bridge,spi_msm_geni,qti_ocp_notifier,i2c_msm_geni,pmic_pon_log,smp2p,sps_drv,msm_gpi,msm_geni_serial,bam_dma,qcom_glink,i3c_master_msm_geni,f_fs_ipc_log,bcl_pmic5,sdhci_msm,ufs_qcom,msm_qmp,qcom_aoss,qrtr,ns,qcom_tsens,qcom_pdc,qcom_rpmh
+qcom_cpu_vendor_hooks    16384  0 
+gh_virt_wdt            16384  0 
+qcom_wdt_core          36864  1 gh_virt_wdt
+qcom_scm              118784  28 msm_drm,camera,msm_eva,ipam,msm_kgsl,msm_video,qcom_q6v5_pas,msm_hw_fence,coresight_tpdm,smcinvoke_dlkm,tz_log_dlkm,eud,phy_msm_m31_eusb2,phy_msm_snps_eusb2,core_hang_detect,qcom_cpuss_sleep_stats,sdhci_msm,arm_smmu,ufs_qcom,qcom_dload_mode,pinctrl_msm,memory_dump_v2,llcc_qcom,mdt_loader,secure_buffer,crypto_qti_hwkm,qcom_pdc,qcom_wdt_core
+minidump               94208  15 cnss2,msm_kgsl,frpc_adsprpc,hardwareinfo,qcom_va_minidump,swinfo,ufs_qcom,qcom_logbuf_vh,qcom_dload_mode,phy_qcom_ufs,memory_dump_v2,dcc_v2,thermal_minidump,qcom_ipc_logging,qcom_wdt_core
+smem                   24576  17 msm_drm,ipam,qcom_q6v5,microdump_collector,rproc_qcom_common,rdbg,subsystem_sleep_stats,qcom_smd,smp2p,sysmon_subsystem_stats,qcom_glink_smem,soc_sleep_stats,adsp_sleepmon,mi_power,msm_qmp,socinfo,minidump
+qcom_hwspinlock        16384  1 
+gh_rm_drv             126976  12 msm_drm,msm_eva,msm_hw_fence,qrtr_gunyah,gh_irq_lend,gh_tlmm_vm_mem_access,gh_mem_notifier,hvc_gunyah,dmesg_dumper,mem_buf_dev,gunyah,minidump
+gh_dbl                 24576  4 msm_hw_fence,qrtr_gunyah,dmesg_dumper,gh_rm_drv
+gh_msgq                24576  4 msm_drm,msm_eva,mem_buf_msgq,gh_rm_drv
+gh_arm_drv             16384  1 gh_rm_drv
+miev                   28672  14 msm_drm,machine_dlkm,mbhc_dlkm,qcom_hv_haptics,qti_battery_charger,xiaomi_touch,audpkt_ion_dlkm,cs35l43_dlkm,cs35l41_dlkm,aw882xx_dlkm,ufs_qcom
