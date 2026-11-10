@@ -40,9 +40,9 @@ bash build.sh
 产物：
 
 ```
-upstream/target/out/SW-v0.2.0-nuwa-v0.2.3/
-├── SW-v0.2.0-nuwa-v0.2.3.img
-└── SW-v0.2.0-nuwa-v0.2.3.img.sha256
+upstream/target/out/SW-v0.2.0-nuwa-v0.2.4/
+├── SW-v0.2.0-nuwa-v0.2.4.img
+└── SW-v0.2.0-nuwa-v0.2.4.img.sha256
 ```
 
 镜像名里的版本来自仓库根的 `VERSION` 文件，镜像文件与它所在的文件夹同名，拷出去单独

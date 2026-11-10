@@ -393,6 +393,133 @@ impl Canvas {
         }
     }
 
+    /// Frost this canvas in place for the lock screen, fast enough to do on
+    /// every frame. The old way took a blurred copy (one full-screen
+    /// floating-point stretch), saturated it (a second full-screen pass)
+    /// and laid it over the frame (a third). Here the colour is pushed away
+    /// from grey on the small field — a linear step, so it survives the
+    /// stretch — and each full-screen pixel is written exactly once, with
+    /// integer interpolation and no intermediate canvas at all.
+    pub fn glass(&mut self, factor: u32, radius: u32, colour: f32) {
+        let (w, h) = (self.w, self.h);
+        let (sw, sh) = ((w / factor.max(1)).max(1), (h / factor.max(1)).max(1));
+        let block = |s: u32, n: u32, cells: u32| {
+            let from = (s as u64 * n as u64 / cells as u64) as u32;
+            let to = (((s as u64 + 1) * n as u64 / cells as u64) as u32).max(from + 1).min(n);
+            (from, to)
+        };
+        // Four samples per cell instead of every pixel: the two box passes
+        // below wash out whatever a sparse sample leaves behind. This is
+        // the difference between reading 4.6 million pixels and half a
+        // million of them.
+        let mut cells: Vec<[f32; 3]> = vec![[0.0; 3]; (sw * sh) as usize];
+        for sy in 0..sh {
+            let (y0, y1) = block(sy, h, sh);
+            for sx in 0..sw {
+                let (x0, x1) = block(sx, w, sw);
+                let (ax, bx) = (x0, ((x0 + x1) / 2).min(x1 - 1));
+                let (ay, by) = (y0, ((y0 + y1) / 2).min(y1 - 1));
+                let (mut r, mut g, mut b) = (0u32, 0u32, 0u32);
+                for y in [ay, by] {
+                    for x in [ax, bx] {
+                        let p = (y as usize * w as usize + x as usize) * 4;
+                        r += self.data[p] as u32;
+                        g += self.data[p + 1] as u32;
+                        b += self.data[p + 2] as u32;
+                    }
+                }
+                cells[(sy * sw + sx) as usize] = [r as f32 / 4.0, g as f32 / 4.0, b as f32 / 4.0];
+            }
+        }
+        // A box across and down, twice over, as `blurred` does.
+        fn box_pass(src: &[[f32; 3]], dst: &mut [[f32; 3]], (sw, sh): (u32, u32), r: i32, across: bool) {
+            let (lines, spots) = if across { (sh, sw) } else { (sw, sh) };
+            for a in 0..lines {
+                for b in 0..spots {
+                    let mut sum = [0.0f32; 3];
+                    let mut n = 0.0;
+                    for d in -r..=r {
+                        let t = b as i32 + d;
+                        if t < 0 || t >= spots as i32 {
+                            continue;
+                        }
+                        let (x, y) = if across { (t as u32, a) } else { (a, t as u32) };
+                        let cell = src[(y * sw + x) as usize];
+                        for (k, s) in sum.iter_mut().enumerate() {
+                            *s += cell[k];
+                        }
+                        n += 1.0;
+                    }
+                    let (x, y) = if across { (b, a) } else { (a, b) };
+                    let cell = &mut dst[(y * sw + x) as usize];
+                    for (k, s) in cell.iter_mut().enumerate() {
+                        *s = sum[k] / n;
+                    }
+                }
+            }
+        }
+        let r = radius as i32;
+        if r > 0 {
+            let mut other = vec![[0.0f32; 3]; cells.len()];
+            for _ in 0..2 {
+                for across in [true, false] {
+                    box_pass(&cells, &mut other, (sw, sh), r, across);
+                    std::mem::swap(&mut cells, &mut other);
+                }
+            }
+        }
+        // Saturation happens on the small field, then each cell is packed
+        // into one word: R, G, B and an opaque alpha. All three channels
+        // are interpolated together, and several screen rows share the
+        // same pair of cell rows, so the horizontal work is done once for
+        // them all rather than once per pixel.
+        let tint: Vec<u32> = cells
+            .iter()
+            .map(|c| {
+                let grey = c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114;
+                let px = |k: usize| (grey + (c[k] - grey) * colour).round().clamp(0.0, 255.0) as u32;
+                0xFF00_0000 | px(0) | (px(1) << 8) | (px(2) << 16)
+            })
+            .collect();
+        let between = |s: u32, n: u32, cells: u32| {
+            let f = ((s as f32 + 0.5) * (cells as f32 / n as f32) - 0.5).max(0.0);
+            let i = (f.floor() as u32).min(cells - 1);
+            let j = (i + 1).min(cells - 1);
+            (i as usize, j as usize, ((f - i as f32) * 256.0) as u32)
+        };
+        let cols: Vec<(usize, usize, u32)> = (0..w).map(|x| between(x, w, sw)).collect();
+        // Two 16-bit lanes at a time, widened so a byte times 256 cannot
+        // overflow into its neighbour.
+        let mix = |a: u32, b: u32, t: u32| -> u32 {
+            let (t, inv) = (t as u64, (256 - t) as u64);
+            let (al, ah) = ((a & 0x00FF_00FF) as u64, ((a >> 8) & 0x00FF_00FF) as u64);
+            let (bl, bh) = ((b & 0x00FF_00FF) as u64, ((b >> 8) & 0x00FF_00FF) as u64);
+            let lo = ((al * inv + bl * t) >> 8) as u32 & 0x00FF_00FF;
+            let hi = ((ah * inv + bh * t) >> 8) as u32 & 0x00FF_00FF;
+            lo | (hi << 8)
+        };
+        let span = sw as usize;
+        let mut top = vec![0u32; w as usize];
+        let mut bottom = vec![0u32; w as usize];
+        let mut pair = (usize::MAX, usize::MAX);
+        for y in 0..h {
+            let (sy0, sy1, ty) = between(y, h, sh);
+            let (r0, r1) = (sy0 * span, sy1 * span);
+            if pair != (sy0, sy1) {
+                for (x, &(sx0, sx1, tx)) in cols.iter().enumerate() {
+                    top[x] = mix(tint[r0 + sx0], tint[r0 + sx1], tx);
+                    bottom[x] = mix(tint[r1 + sx0], tint[r1 + sx1], tx);
+                }
+                pair = (sy0, sy1);
+            }
+            let row = y as usize * w as usize * 4;
+            for x in 0..w as usize {
+                let v = mix(top[x], bottom[x], ty).to_le_bytes();
+                self.data[row + x * 4..row + x * 4 + 4].copy_from_slice(&v);
+            }
+        }
+    }
+
     /// The average light of this canvas, 0 at black and 255 at white, by
     /// the weight the eye gives each of the three. What decides whether a
     /// pane is a light one, over which the words are dark, or a dark one,

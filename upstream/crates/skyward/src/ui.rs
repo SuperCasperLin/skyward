@@ -1084,6 +1084,12 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
     let locale = request.locale.as_deref().or(info.locale.as_deref());
     let named = locale.map(Lang::for_locale).transpose()?;
     app.take_settings(kept.settings(), named);
+    // A boot into the menu starts behind the lock: the code kept from the
+    // starts before is not something a restart should walk past. Work the
+    // bootloader asked for (fastboot, sideload, a wipe) is left alone.
+    if matches!(&request.work, Work::Menu) {
+        app.lock_on_boot(0);
+    }
     let mut keeper = Keeper::new(&kept);
     skyward_sys::kmsg(&format!(
         "the pages speak {:?}, {}, and the locale named is {}",

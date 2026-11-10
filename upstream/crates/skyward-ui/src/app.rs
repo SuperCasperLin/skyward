@@ -2537,11 +2537,15 @@ const LOCK_BLUR_SHRINK: u32 = 6;
 /// How wide a box the shrunk page is softened by, counted in its own cells.
 const LOCK_BLUR_RADIUS: u32 = 3;
 
-/// How often the glass over a page that keeps moving is taken again. The
-/// colour field behind the About page turns slowly: a quarter of a second
-/// changes it by under two levels out of 255, so a fresh blur now and then
-/// reads as continuous while costing a fraction of a blur every frame.
-const LOCK_BACKDROP_MS: u64 = 250;
+/// A live page is shrunk a little further than a still one: at 1/8 the
+/// whole frame fits 16.7 ms while staying smooth, where 1/6 took 13 ms for
+/// the frosting alone. Only the moving page uses this; a still one keeps
+/// the 1/6 pane it has always had.
+const LOCK_GLASS_SHRINK: u32 = 8;
+
+/// The page behind a lock that keeps moving is frosted again on every
+/// frame; `Canvas::glass()` measures 13 ms on this device, inside the
+/// 16.7 ms a 60 Hz panel allows. A still page keeps its one cached pane.
 
 /// How far the blurred page's colours are pushed past the grey a blur
 /// leaves them at, so the pane keeps the page's hue instead of washing it
@@ -2887,6 +2891,10 @@ pub struct App {
     /// The panel is locked: the lock screen stands over the page, which
     /// takes nothing until it is opened.
     locked: bool,
+    /// The lock standing was put there by a boot, not by a power key or a
+    /// screen-off: a panel with no touch screen takes it off again, since
+    /// there would be no way to make the slide that opens it.
+    boot_lock: bool,
     /// How far the lock screen's slide has been pulled up, 0 to 1.
     pulled: f32,
     /// Where the finger pulling it landed, while it is down.
@@ -2902,11 +2910,12 @@ pub struct App {
     /// what stands in its place.
     lock_asking: bool,
     /// The page under the lock screen, blurred. A still page gives it once
-    /// when the panel locks; one that keeps moving gives it again now and
-    /// then, no more often than `LOCK_BACKDROP_MS`.
+    /// when the panel locks; a live one is frosted straight onto the frame
+    /// each time, using no cache at all.
     lock_backdrop: Option<Canvas>,
-    /// When the glass was last taken, for the pages that take it again.
-    lock_backdrop_at: u64,
+    /// Whether the words have been given their colour for this lock. A field
+    /// drifting past the light/dark line must not flip them mid-lock.
+    lock_words_set: bool,
     /// Whether the pane under the lock screen is a dark one, and so takes
     /// the light words rather than the dark — or, where the settings hold
     /// one colour, whether that colour is the light one.
@@ -3016,6 +3025,7 @@ impl App {
             aod_day: String::new(),
             aod_since: None,
             locked: false,
+            boot_lock: false,
             pulled: 0.0,
             lock_from: None,
             lock_pressed: None,
@@ -3023,7 +3033,7 @@ impl App {
             lock_wrong: None,
             lock_asking: false,
             lock_backdrop: None,
-            lock_backdrop_at: 0,
+            lock_words_set: false,
             lock_dark: true,
             shift_at: None,
             charging: None,
@@ -3336,6 +3346,17 @@ impl App {
         self.glowing()
     }
 
+    /// The ink the words take over a pane of this lightness, unless the
+    /// settings hold one colour. Read once for each lock, never once a
+    /// frame: a colour field drifting past the line must not flip the words.
+    fn words_for(&self, luma: f32) -> bool {
+        match self.state.lock_ink {
+            LOCK_INK_LIGHT => false,
+            LOCK_INK_DARK => true,
+            _ => luma < LOCK_LIGHT,
+        }
+    }
+
     /// Whether the bar's title and the bar belong over the rendered page
     /// where it is scrolled: the title once the large one has faded, the bar
     /// once the content slides under it. On the About page both come once
@@ -3462,6 +3483,7 @@ impl App {
         self.lock_pressed = None;
         self.lock_asking = false;
         self.lock_backdrop = None;
+        self.lock_words_set = false;
     }
 
     /// A tap of the motor, where the settings have it on.
@@ -3533,6 +3555,19 @@ impl App {
         }
     }
 
+    /// A boot into the pages starts behind the lock, so a code kept from
+    /// the starts before is not something a restart walks past. Special
+    /// work (fastboot, a wipe, sideload) is not held up by it; the runtime
+    /// asks for this only where a person is coming in.
+    pub fn lock_on_boot(&mut self, now: u64) {
+        if self.state.lock && !self.keys {
+            self.lock_put();
+            self.boot_lock = true;
+            self.dirty = true;
+            self.stir(now);
+        }
+    }
+
     /// The slide made on a lock screen with a code: the keypad comes up in
     /// its place, with nothing typed yet.
     fn ask_code(&mut self, now: u64) {
@@ -3601,6 +3636,7 @@ impl App {
     /// Open the lock screen: the page under it takes the finger again.
     fn unlock_panel(&mut self, now: u64) {
         self.locked = false;
+        self.boot_lock = false;
         self.pulled = 0.0;
         self.lock_from = None;
         self.lock_typed.clear();
@@ -3608,6 +3644,7 @@ impl App {
         self.lock_pressed = None;
         self.lock_asking = false;
         self.lock_backdrop = None;
+        self.lock_words_set = false;
         self.dirty = true;
         self.stir(now);
         self.refresh();
@@ -4789,40 +4826,38 @@ impl App {
             return;
         }
         let charge = self.charging.as_ref().map_or(0.0, |c| c.shown.level(now));
-        // A locked panel's page is drawn once, for the lock screen to be
-        // seen through. The exception is a page that keeps moving under the
-        // lock: its glass is taken again now and then, not every frame —
-        // one blur costs 46 ms, while the colour behind it changes slowly.
-        let refresh = self.locked && charge < 1.0 && self.lock_backdrop.is_some()
-            && self.live_backdrop() && now.saturating_sub(self.lock_backdrop_at) >= LOCK_BACKDROP_MS;
-        if charge < 1.0 && (!self.locked || self.lock_backdrop.is_none() || refresh) {
+        // A still page keeps the pane taken when the panel locked. A page
+        // that keeps moving under it is frosted again on every frame: one
+        // integer pass over the screen (13 ms here) fits the 16.7 ms a
+        // 60 Hz panel allows, so there is no throttle to look jerky.
+        let live = self.locked && charge < 1.0 && self.live_backdrop();
+        if charge < 1.0 && (!self.locked || self.lock_backdrop.is_none() || live) {
             self.compose_page(out, f, info, clock, now);
         }
         // A locked panel shows the lock screen over the page, which waits
         // under it for the slide to be made.
         if self.locked {
-            if (self.lock_backdrop.is_none() || refresh) && charge < 1.0 {
+            if live {
+                out.glass(LOCK_GLASS_SHRINK, LOCK_BLUR_RADIUS, LOCK_COLOUR);
+                self.lock_backdrop.take();
+                if !self.lock_words_set {
+                    self.lock_dark = self.words_for(out.luma());
+                    self.lock_words_set = true;
+                }
+            } else if charge < 1.0 && self.lock_backdrop.is_none() {
                 let mut seen = out.blurred(LOCK_BLUR_SHRINK, LOCK_BLUR_RADIUS);
                 seen.saturate(LOCK_COLOUR);
-                // Only the first pane decides the words: taking another one
-                // as a colour field drifts must not flip black words to white
-                // halfway through a lock because its average crossed a line.
-                if self.lock_backdrop.is_none() {
-                    // Nothing is laid over the page: no grey sheet, no shade
-                    // at the head or the foot. What the pane carries decides
-                    // the words instead — a light page takes dark words, a
-                    // dark one light words. A hand that wants them otherwise
-                    // holds one colour here.
-                    self.lock_dark = match self.state.lock_ink {
-                        LOCK_INK_LIGHT => false,
-                        LOCK_INK_DARK => true,
-                        _ => seen.luma() < LOCK_LIGHT,
-                    };
+                // Nothing is laid over the page: no grey sheet, no shade at
+                // the head or the foot. What the pane carries decides the
+                // words instead — a light page takes dark words, a dark one
+                // light words. A hand that wants them otherwise holds one.
+                if !self.lock_words_set {
+                    self.lock_dark = self.words_for(seen.luma());
+                    self.lock_words_set = true;
                 }
                 self.lock_backdrop = Some(seen);
-                self.lock_backdrop_at = now;
             }
-            self.compose_lock(out, f, info, clock, now);
+            self.compose_lock(out, f, info, clock, now, live);
         }
         // The charging screen is a panel of its own and covers both: it is
         // what a cable going in lights the screen for, whatever was under it.
@@ -4887,14 +4922,17 @@ impl App {
     /// the code is typed on once the slide has been made. Its inks go light
     /// or dark with the pane under them, so nothing is laid over the page to
     /// make room for the words.
-    fn compose_lock(&mut self, out: &mut Canvas, f: &Fonts, info: &DeviceInfo, clock: &str, now: u64) {
+    fn compose_lock(&mut self, out: &mut Canvas, f: &Fonts, info: &DeviceInfo, clock: &str, now: u64, over_glass: bool) {
         let dark = Theme::dark(self.w, self.h, self.px_per_dp);
         let m = dark.m;
         let cx = out.w as f32 / 2.0;
-        // What lies under the lock screen, as it was when the panel locked.
-        match &self.lock_backdrop {
-            Some(seen) => out.lay(seen, 0, 0, 1.0),
-            None => out.clear(Rgba::rgb(0, 0, 0)),
+        // A page that keeps moving has just been frosted straight onto this
+        // very canvas; a still one is laid from the pane it was locked with.
+        if !over_glass {
+            match &self.lock_backdrop {
+                Some(seen) => out.lay(seen, 0, 0, 1.0),
+                None => out.clear(Rgba::rgb(0, 0, 0)),
+            }
         }
         // With a keypad under it the clock stands higher, above the dots.
         let cy = out.h as f32 * if self.lock_asking { 0.20 } else { 0.26 };
@@ -6232,6 +6270,7 @@ impl App {
                 // that holds the words to one colour needs no new reading,
                 // but the way that follows it does.
                 self.lock_backdrop = None;
+        self.lock_words_set = false;
                 self.refresh();
             }
             Action::Language(l) => {
@@ -7214,6 +7253,14 @@ impl App {
     /// from now on.
     pub fn touchscreen_missing(&mut self) {
         self.keys = true;
+        // A boot puts the lock up before the panel is known to have a touch
+        // screen. Without one the slide could never be made, so take it off.
+        if self.boot_lock {
+            self.locked = false;
+            self.boot_lock = false;
+            self.lock_backdrop = None;
+            self.lock_words_set = false;
+        }
         self.dirty = true;
     }
 
@@ -7338,7 +7385,18 @@ impl App {
                     // Turning the screen off, the key ticks the motor.
                     None => {
                         self.button = Some((key, Press::Spent));
-                        self.sleep(now);
+                        // The power key locks the panel while it stays lit:
+                        // what turns the always-on clock on is the screen
+                        // going off by itself later, not the key. A second
+                        // press on a panel already locked does put it out.
+                        if self.state.lock && !self.keys && !self.locked {
+                            self.lock_put();
+                            self.boot_lock = false;
+                            self.dirty = true;
+                            self.stir(now);
+                        } else {
+                            self.sleep(now);
+                        }
                         return vec![Effect::Ticks];
                     }
                 }
@@ -9658,6 +9716,7 @@ mod tests {
     fn the_recovery_comes_up_from_fastboot_at_the_home_page() {
         let (f, i) = (fonts(), info());
         let mut app = App::new(Screen::Fastboot, W, H, PPD);
+        app.state.lock = false;
         app.frame(&f, &i);
         app.enter_recovery();
         assert_eq!(app.screen(), Screen::Home);
@@ -9914,6 +9973,7 @@ mod tests {
     fn a_touch_puts_the_light_out_and_a_volume_key_brings_it_back() {
         let (f, i) = (fonts(), info());
         let mut app = App::new(Screen::Home, W, H, PPD);
+        app.state.lock = false;
         app.frame(&f, &i);
         light_on(&mut app, &f, &i, Stop::Hit(Action::Open(Screen::About)));
         let mut c = Canvas::new(W, H);
@@ -12211,6 +12271,7 @@ mod tests {
     #[test]
     fn power_key_turns_the_panel_off_and_on() {
         let mut app = App::new(Screen::Home, W, H, PPD);
+        app.state.lock = false;
         assert!(app.key(Key::Power, 0).is_empty());
         assert_eq!(app.panel(0), Some(SLIDER_START), "it waits for volume down first");
         assert_eq!(app.deadline(0), Some(CHORD_MS));
@@ -12228,6 +12289,7 @@ mod tests {
     #[test]
     fn the_power_key_turning_the_screen_off_ticks_the_motor_whatever_the_settings() {
         let mut app = App::new(Screen::Home, W, H, PPD);
+        app.state.lock = false;
         app.tick(0);
         assert_eq!(press(&mut app, Key::Power, 1000), vec![Effect::Ticks]);
         assert!(app.tick(1400).is_empty(), "once");
@@ -12235,6 +12297,7 @@ mod tests {
         press(&mut app, Key::Power, 2000);
         assert_eq!(press(&mut app, Key::Power, 3000), vec![Effect::Ticks], "with vibration off too");
         let mut app = App::new(Screen::Home, W, H, PPD);
+        app.state.lock = false;
         app.tick(0);
         assert!(app.tick(OFF).is_empty(), "but not the screen going off by itself");
         assert!(!app.display_on());
@@ -12397,12 +12460,44 @@ mod tests {
     }
 
     #[test]
+    fn a_boot_starts_behind_the_lock_but_a_panel_without_touch_does_not() {
+        let mut app = App::new(Screen::Home, W, H, PPD);
+        app.lock_on_boot(0);
+        assert!(app.locked(), "a restart does not walk past the code kept before it");
+        app.touchscreen_missing();
+        assert!(!app.locked(), "with no touch panel the slide could never be made");
+
+        let mut app = App::new(Screen::Home, W, H, PPD);
+        app.state.lock = false;
+        app.lock_on_boot(0);
+        assert!(!app.locked(), "and a lock switched off stays off");
+    }
+
+    #[test]
+    fn the_power_key_locks_while_lit_and_the_timer_takes_it_to_the_clock() {
+        let mut app = App::new(Screen::Home, W, H, PPD);
+        app.tick(0);
+        assert_eq!(press(&mut app, Key::Power, 1000), vec![Effect::Ticks]);
+        assert!(app.locked(), "the key put the lock up");
+        assert!(app.display_on(), "but left the panel lit on the lock screen");
+        assert!(app.aod_since.is_none(), "the always-on clock is not up yet");
+        // The screen-off timer, not the key, takes it the rest of the way.
+        app.tick(1000 + OFF);
+        assert!(!app.display_on(), "later the panel goes off by itself");
+        assert!(app.aod_since.is_some(), "and the always-on clock comes up then");
+        assert!(app.locked(), "still locked behind it");
+    }
+
+    #[test]
     fn a_panel_that_goes_off_locks_and_the_slide_up_opens_it() {
         let (f, i) = (fonts(), info());
         let mut app = App::new(Screen::Home, W, H, PPD);
         let (x, y) = spot(&mut app, &f, &i, Action::Open(Screen::Settings));
         press(&mut app, Key::Power, 0);
-        assert!(!app.display_on(), "the power key put it out");
+        assert!(app.display_on(), "the first press leaves the panel lit on the lock");
+        assert!(app.locked(), "and puts the lock up");
+        press(&mut app, Key::Power, 50);
+        assert!(!app.display_on(), "the second press puts it out");
         assert!(app.locked(), "and it went off locked");
         // The finger that lights it lands on the lock screen, not the page.
         app.touch(Touch::Down(x, y), &f, 100);
@@ -12585,7 +12680,7 @@ mod tests {
     }
 
     #[test]
-    fn a_moving_page_takes_the_glass_again_and_a_still_page_never_does() {
+    fn a_moving_page_is_frosted_every_frame_and_a_still_one_never_is() {
         fn pane_ink(c: &Canvas) -> u64 {
             c.data.as_chunks::<4>().0.iter().map(|p| p[0] as u64 + p[1] as u64 + p[2] as u64).sum()
         }
@@ -12601,26 +12696,25 @@ mod tests {
         }
         still.compose(&mut c, &f, &i, "08:14", 1000);
         assert_eq!(still.lock_backdrop.as_ref().map(pane_ink), first, "a still page keeps its first pane");
-        assert_eq!(still.lock_backdrop_at, 0, "and never takes another");
+        assert!(still.lock_backdrop.is_some(), "and keeps using the cache");
 
-        // The About page's colour field moves on under the lock.
+        // The About page's field moves on under the lock, so every frame
+        // frosts the page straight onto the frame with no cache at all.
         let mut live = App::new(Screen::About, W, H, PPD);
         live.tick(0);
         live.lock_now(0);
         live.compose(&mut c, &f, &i, "08:14", 0);
-        let first = live.lock_backdrop.as_ref().map(pane_ink).expect("the About page has a pane");
+        let first = pane_ink(&c);
         let words = live.lock_dark;
-        for ms in (0..=240).step_by(16) {
+        assert!(live.lock_backdrop.is_none(), "a live page uses no cached pane");
+        live.tick(16);
+        live.compose(&mut c, &f, &i, "08:14", 16);
+        assert!(live.lock_backdrop.is_none(), "not even one frame later");
+        for ms in (16..=1000).step_by(16) {
             live.tick(ms);
         }
-        live.compose(&mut c, &f, &i, "08:14", 240);
-        assert_eq!(live.lock_backdrop_at, 0, "short of a quarter second the old glass stays");
-        for ms in (240..=520).step_by(16) {
-            live.tick(ms);
-        }
-        live.compose(&mut c, &f, &i, "08:14", 520);
-        assert_eq!(live.lock_backdrop_at, 520, "then the glass is taken again");
-        assert_ne!(live.lock_backdrop.as_ref().map(pane_ink), Some(first), "and it shows the field where it has moved to");
+        live.compose(&mut c, &f, &i, "08:14", 1000);
+        assert_ne!(pane_ink(&c), first, "and the glass shows the field where it has moved to");
         assert_eq!(live.lock_dark, words, "the words keep their colour as the field drifts");
     }
 
@@ -12873,6 +12967,7 @@ mod tests {
     #[test]
     fn a_cable_going_in_on_the_dark_panel_shows_the_charging_screen_and_goes_dark_again() {
         let mut app = App::new(Screen::Home, W, H, PPD);
+        app.state.lock = false;
         app.state.aod = false;
         app.tick(0);
         press(&mut app, Key::Power, 0);
@@ -12949,6 +13044,7 @@ mod tests {
     #[test]
     fn the_content_goes_dark_under_the_backlight_it_had_before_the_panel_goes_off() {
         let mut app = App::new(Screen::Home, W, H, PPD);
+        app.state.lock = false;
         app.state.aod = false;
         app.tick(0);
         press(&mut app, Key::Power, 1000);
@@ -12964,6 +13060,7 @@ mod tests {
     #[test]
     fn the_power_key_as_the_content_goes_dark_brings_it_back() {
         let mut app = App::new(Screen::Home, W, H, PPD);
+        app.state.lock = false;
         app.tick(0);
         press(&mut app, Key::Power, 1000);
         app.tick(1100);
@@ -12978,6 +13075,7 @@ mod tests {
     fn the_content_comes_up_from_black_as_the_panel_lights() {
         let (f, i) = (fonts(), info());
         let mut app = App::new(Screen::Home, W, H, PPD);
+        app.state.lock = false;
         app.tick(0);
         press(&mut app, Key::Power, 0);
         app.tick(365);
@@ -12998,6 +13096,7 @@ mod tests {
     fn only_the_power_key_lights_the_dark_panel_and_does_nothing_else() {
         let (f, i) = (fonts(), info());
         let mut app = opened(Screen::Settings, &f, &i);
+        app.state.lock = false;
         press(&mut app, Key::Power, 0);
         for (key, at) in [(Key::Back, 10), (Key::VolumeUp, 20), (Key::VolumeDown, 30)] {
             assert!(press(&mut app, key, at).is_empty());
@@ -13012,6 +13111,7 @@ mod tests {
     fn a_stray_press_just_after_the_panel_lights_only_keeps_it_awake() {
         let (f, i) = (fonts(), info());
         let mut app = opened(Screen::Reboot, &f, &i);
+        app.state.lock = false;
         press(&mut app, Key::Power, 0);
         // A key wakes the panel; the next, within the guard, does not sleep
         // it again or act.
@@ -13049,6 +13149,7 @@ mod tests {
     fn a_finger_held_as_the_panel_goes_off_lets_go() {
         let (f, i) = (fonts(), info());
         let mut app = App::new(Screen::Reboot, W, H, PPD);
+        app.state.lock = false;
         let track = app.frame(&f, &i).hits.iter().find(|h| h.action == Action::Confirm(Confirm::Reboot)).unwrap().rect;
         let y = track.centre().1;
         app.touch(Touch::Down(track.x + track.h / 2.0, y), &f, 0);
@@ -13076,6 +13177,7 @@ mod tests {
     fn the_installer_lights_the_panel_when_it_needs_the_user() {
         let (f, i) = (fonts(), info());
         let mut app = sideloading(&f, &i);
+        app.state.lock = false;
         press(&mut app, Key::Power, 0);
         app.install(Event::Checking { size: 1 << 20 }, 10);
         assert!(!app.display_on(), "reading the package does not light it");
@@ -13095,6 +13197,7 @@ mod tests {
     fn an_install_ending_after_its_page_was_left_keeps_the_panel_dark() {
         let (f, i) = (fonts(), info());
         let mut app = sideloading(&f, &i);
+        app.state.lock = false;
         assert_eq!(app.key(Key::Back, 0), vec![Effect::Cancel]);
         press(&mut app, Key::Power, 10);
         app.install(Event::Finished(Outcome::Cancelled), 20);

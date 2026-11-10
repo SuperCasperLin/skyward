@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use std::time::Instant;
 use skyward_config::DeviceConfig;
 use skyward_info::{Battery, Boot, Charge, Cpu, DeviceInfo, PatchLevel, Storage};
 use skyward_install::{Failure, ImageKind, Outcome, Ramdisk, Reflash, Refusal, Stage};
@@ -156,7 +157,6 @@ fn main() -> Result<()> {
             // What a lock screen that re-blurred the page every frame would
             // cost: the page is drawn again, then shrunk, blurred twice and
             // stretched back over 1440x3200. Measured on the device itself.
-            use std::time::Instant;
             let mut app = App::new(Screen::Home, w, h, cfg.display.density as f32 / 160.0);
             let info = nezha(&cfg);
             let mut page = Canvas::new(w, h);
@@ -177,6 +177,76 @@ fn main() -> Result<()> {
             }
             let blur_ms = blurred.elapsed().as_secs_f64() * 1000.0 / n as f64;
             println!("page redraw {page_ms:.2} ms/frame; blur+saturate {blur_ms:.2} ms/frame; both {:.2} ms/frame", page_ms + blur_ms);
+            // Where the 46 ms goes, so the fast path knows what to replace.
+            let stages = Instant::now();
+            for _ in 0..n {
+                let mut c = page.blurred(6, 3);
+                std::hint::black_box(&c);
+                let _ = &mut c;
+            }
+            let blur_only = stages.elapsed().as_secs_f64() * 1000.0 / n as f64;
+            let sat = Instant::now();
+            for _ in 0..n {
+                let mut c = page.blurred(6, 3);
+                c.saturate(1.55);
+                std::hint::black_box(&c);
+            }
+            let with_sat = sat.elapsed().as_secs_f64() * 1000.0 / n as f64;
+            let pane = page.blurred(6, 3);
+            let laid = Instant::now();
+            for _ in 0..n {
+                let mut c = Canvas::new(w, h);
+                c.lay(&pane, 0, 0, 1.0);
+                std::hint::black_box(&c);
+            }
+            let lay_ms = laid.elapsed().as_secs_f64() * 1000.0 / n as f64;
+            println!("  stages: blurred {blur_only:.2} ms, +saturate {with_sat:.2} ms, lay {lay_ms:.2} ms");
+            // The one-pass integer path: copy in, frost in place. Time the
+            // copy alone so the number below is the frosting only.
+            let copying = Instant::now();
+            for _ in 0..n {
+                let mut c = Canvas::new(w, h);
+                c.data.copy_from_slice(&page.data);
+                std::hint::black_box(&c);
+            }
+            let copy_ms = copying.elapsed().as_secs_f64() * 1000.0 / n as f64;
+            let frosting = Instant::now();
+            for _ in 0..n {
+                let mut c = Canvas::new(w, h);
+                c.data.copy_from_slice(&page.data);
+                c.glass(6, 3, 1.55);
+                std::hint::black_box(&c);
+            }
+            let glass_ms = frosting.elapsed().as_secs_f64() * 1000.0 / n as f64 - copy_ms;
+            println!("  one-pass glass: {glass_ms:.2} ms/frame (copy {copy_ms:.2} ms), 60 fps budget 16.67 ms");
+            for factor in [8u32, 10, 12] {
+                let at = Instant::now();
+                for _ in 0..n {
+                    let mut c = Canvas::new(w, h);
+                    c.data.copy_from_slice(&page.data);
+                    c.glass(factor, 3, 1.55);
+                    std::hint::black_box(&c);
+                }
+                println!("    glass 1/{factor}: {:.2} ms/frame", at.elapsed().as_secs_f64() * 1000.0 / n as f64 - copy_ms);
+            }
+            // What the fast pane gives away in looks: compare it with the
+            // slow one, pixel for pixel and side by side.
+            let mut slow = page.blurred(6, 3);
+            slow.saturate(1.55);
+            let mut quick = Canvas::new(w, h);
+            quick.data.copy_from_slice(&page.data);
+            quick.glass(8, 3, 1.55);
+            let (mut diff, mut peak) = (0u64, 0u32);
+            for (a, b) in slow.data.as_chunks::<4>().0.iter().zip(quick.data.as_chunks::<4>().0.iter()) {
+                for k in 0..3 {
+                    let d = (a[k] as i32 - b[k] as i32).unsigned_abs();
+                    diff += d as u64;
+                    peak = peak.max(d);
+                }
+            }
+            println!("  fast pane vs old: {:.2}/255 mean, {peak}/255 max", diff as f64 / (w as f64 * h as f64 * 3.0));
+            write_png(&out.join("pane-old.png"), &slow)?;
+            write_png(&out.join("pane-fast.png"), &quick)?;
             for factor in [6u32, 8, 12, 16] {
                 let at = Instant::now();
                 for _ in 0..n {
@@ -246,9 +316,12 @@ fn main() -> Result<()> {
             app.tick(0);
             app.lock_now(0);
             let mut c = Canvas::new(w, h);
+            let frames = Instant::now();
+            let mut drawn = 0u32;
             for ms in (0..=4000).step_by(16) {
                 app.tick(ms);
                 app.compose(&mut c, &fonts, &info, "08:14", ms);
+                drawn += 1;
                 if ms == 0 {
                     let path = out.join("lock-about-0.png");
                     write_png(&path, &c)?;
@@ -259,6 +332,7 @@ fn main() -> Result<()> {
             let path = out.join("lock-about-4s.png");
             write_png(&path, &c)?;
             println!("wrote {}", path.display());
+            println!("whole lock frame {:.2} ms/frame over {drawn} frames, 60 fps budget 16.67 ms", frames.elapsed().as_secs_f64() * 1000.0 / drawn as f64);
             return Ok(());
         }
         if looking == Some("--lock") {
