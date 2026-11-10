@@ -1077,7 +1077,7 @@ fn main() -> Result<()> {
     }
 
     // The panel mid-gesture, to set beside recordings of the same moves.
-    let moments: [Moment; 30] = [
+    let moments: [Moment; 31] = [
         // A code given four digits, and the page asking for it again with
         // two of the second telling typed.
         ("07-set-code", Screen::SetCode, false, &|app, f| {
@@ -1094,6 +1094,14 @@ fn main() -> Result<()> {
             app.state.lock_ink = LOCK_INK_DARK;
             app.refresh();
             2000
+        }),
+        // A swipe in from the left edge of the first page: the cue comes up
+        // and the page stays put, though nothing waits behind it.
+        ("07d-home-edge-cue", Screen::Home, false, &|app, f| {
+            app.touch(Touch::Down(8.0, 1600.0), f, 100);
+            app.touch(Touch::Move(80.0, 1600.0), f, 120);
+            app.touch(Touch::Move(400.0, 1600.0), f, 140);
+            140
         }),
         ("08-about-light", Screen::About, false, &|_, _| 2000),
         ("08-about-dark", Screen::About, true, &|_, _| 2000),

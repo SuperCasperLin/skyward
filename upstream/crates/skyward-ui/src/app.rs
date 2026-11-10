@@ -5035,7 +5035,10 @@ impl App {
         }
         widgets::keypad(out, &glass, f, l, top, self.lock_pressed, l.pick(["解锁", "解鎖", "Unlock"]));
         let dots_cy = top - m.dp(52.0);
-        glass.pal.accent = self.lock_ink();
+        // The dots keep the blue of the page that asks for a decryption, not
+        // the ink of the glass: a code is the same code wherever it is typed,
+        // and what has been typed should read the same in both places.
+        glass.pal.accent = self.theme().pal.accent;
         widgets::code_dots(out, &glass, cx, dots_cy, self.lock_typed.chars().count());
         let wrong = self.lock_wrong.is_some_and(|at| now < at + LOCK_WRONG_MS);
         if wrong {
@@ -6895,9 +6898,11 @@ impl App {
                 } else {
                     None
                 };
-                // The first page has nothing to go back to: its edges are
-                // like the rest of it.
-                let at_edge = side.filter(|_| self.stack.len() > 1);
+                // Every page answers a swipe in from an edge, the first one
+                // too. On that one there is nothing behind it, but the finger
+                // is still caught by the gesture rather than left to scroll
+                // the page under it when the hand falls into the old habit.
+                let at_edge = side;
                 // A swipe in from an edge goes back over whatever the page is
                 // doing: a finger landing there leaves a gliding or springing
                 // page alone until it drags the page, and presses nothing.
@@ -7013,8 +7018,9 @@ impl App {
                     let travel = if from_left { x - start } else { start - x };
                     let ready = travel > m.dp(BACK_SWIPE_DP);
                     // A tap of the motor as the `<` appears, as the system
-                    // gives.
-                    if ready && !armed && self.state.vibrate {
+                    // gives, but not on the first page, where the cue arms
+                    // and yet nothing can come of it.
+                    if ready && !armed && self.state.vibrate && self.stack.len() > 1 {
                         fx.push(Effect::Haptic);
                     }
                     self.drag = Drag::Edge { start, from_left, armed: ready, x, cy };
@@ -7082,13 +7088,18 @@ impl App {
                         _ => self.settle_fold(now),
                     }
                 }
-                Drag::Edge { armed: true, .. } => fx.extend(self.back(now)),
-                Drag::Edge { start, from_left, x, cy, .. } => {
-                    // Short of going back, the cue sinks back into the edge.
-                    let travel = if from_left { x - start } else { start - x };
-                    let depth = widgets::back_cue_depth(&t, travel);
-                    self.cue = Some((from_left, cy, Spring::new(now, depth, 0.0, 0.15)));
-                    self.dirty = true;
+                Drag::Edge { start, from_left, armed, x, cy } => {
+                    if armed && self.stack.len() > 1 {
+                        fx.extend(self.back(now));
+                    } else {
+                        // Short of going back, the cue sinks back into the
+                        // edge — including on the first page, where an armed
+                        // cue has nowhere to go and must not simply vanish.
+                        let travel = if from_left { x - start } else { start - x };
+                        let depth = widgets::back_cue_depth(&t, travel);
+                        self.cue = Some((from_left, cy, Spring::new(now, depth, 0.0, 0.15)));
+                        self.dirty = true;
+                    }
                 }
                 Drag::Confirm { which, track, .. } => {
                     let done = self.state.confirm > SLID;
@@ -8875,16 +8886,19 @@ mod tests {
     }
 
     #[test]
-    fn the_first_page_has_no_edge_swipe_back() {
+    fn the_first_page_catches_an_edge_swipe_without_going_back() {
         let f = fonts();
         let mut app = App::new(Screen::Home, W, H, PPD);
+        let before = app.top().1;
         app.touch(Touch::Down(10.0, 1600.0), &f, 0);
         app.touch(Touch::Move(80.0, 1600.0), &f, 8);
-        assert!(app.touch(Touch::Move(400.0, 1600.0), &f, 16).is_empty(), "no tap of the motor");
-        assert!(!matches!(app.drag, Drag::Edge { .. }), "no cue");
+        assert!(matches!(app.drag, Drag::Edge { from_left: true, .. }), "the first page takes the swipe too");
+        assert!(app.touch(Touch::Move(400.0, 1600.0), &f, 16).is_empty(), "no tap of the motor where nothing waits");
+        assert_eq!(app.top().1, before, "the page under the finger has not scrolled");
+        assert!(matches!(app.drag, Drag::Edge { armed: true, .. }), "the cue still arms, though it opens nothing");
         app.touch(Touch::Up, &f, 24);
-        assert_eq!(app.screen(), Screen::Home);
-        assert_eq!(app.deadline(24), app.idle_due(), "nothing left on screen to settle");
+        assert_eq!(app.screen(), Screen::Home, "and there is nowhere to go back to");
+        assert!(app.cue.is_some(), "the cue sinks back into the edge instead of vanishing");
     }
 
     #[test]
@@ -12418,6 +12432,33 @@ mod tests {
         app.touch(Touch::Move(700.0, 1500.0), &f, 320);
         app.touch(Touch::Up, &f, 340);
         assert!(app.lock_asking, "and the slide brings it back");
+    }
+
+    #[test]
+    fn the_lock_screens_dots_keep_the_decrypt_pages_blue() {
+        let (f, i) = (fonts(), info());
+        let m = Theme::dark(W, H, PPD).m;
+        let top = H as f32 - widgets::keypad_height(&Theme::dark(W, H, PPD));
+        let dots_cy = top - m.dp(52.0);
+        // Two digits typed: the first of the two dots stands half a pitch to
+        // the left of the middle of the panel.
+        let x = W as f32 / 2.0 - m.dp(26.0) / 2.0;
+        for dark in [false, true] {
+            let mut app = App::new(Screen::Home, W, H, PPD);
+            app.state.dark = dark;
+            // The words are white whatever the glass is; the dots are blue
+            // in both, as they are on the page that asks for a decryption.
+            app.state.lock_ink = LOCK_INK_DARK;
+            app.lock_now(0);
+            app.lock_asking = true;
+            app.lock_typed = "12".to_string();
+            let mut c = Canvas::new(W, H);
+            app.compose(&mut c, &f, &i, "12:00", 0);
+            let blue = app.theme().pal.accent;
+            let ink = app.lock_ink();
+            assert_eq!(rgb(&c, x, dots_cy), (blue.r, blue.g, blue.b), "the dot is the decrypt page's blue");
+            assert_ne!(rgb(&c, x, dots_cy), (ink.r, ink.g, ink.b), "and not the ink the words take");
+        }
     }
 
     #[test]
