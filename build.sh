@@ -6,7 +6,9 @@
 #   bash build.sh pack       # reuse the binaries, refetch nothing
 #
 # The image is written to upstream/target/out/<version>/, the version being
-# the one in VERSION: SW-v<upstream release>-nuwa-v<port revision>.
+# the one in VERSION: SW-v<upstream release>-nuwa-v<port revision>. The image
+# carries the same name as its folder, so two copies pulled out of the tree
+# can still be told apart without looking at the directory they came from.
 #
 # Needs: rustc + the aarch64-linux-android target, cargo-ndk, the NDK.
 set -euo pipefail
@@ -50,6 +52,7 @@ fi
 
 if [ "$STAGE" = "all" ] || [ "$STAGE" = "pack" ]; then
     OUT="target/out/$VERSION"
+    IMG="$OUT/$VERSION.img"
     mkdir -p "$OUT" "target/stock/$DEV"
 
     banner "stock recovery partition"
@@ -70,9 +73,10 @@ if [ "$STAGE" = "all" ] || [ "$STAGE" = "pack" ]; then
         --font resources/fonts/MiSansVF.ttf \
         --mono resources/fonts/KirkMono-Regular.ttf \
         --mono-license resources/fonts/KirkMono-OFL.txt \
-        --out "$OUT/skyward-$DEV.img"
+        --out "$IMG"
 
     banner "result"
-    ls -l "$OUT/skyward-$DEV.img"
-    ( cd "$OUT" && sha256sum "skyward-$DEV.img" | tee "skyward-$DEV.img.sha256" )
+    ls -l "$IMG"
+    # -t: two spaces, not the '*' Windows sha256sum puts in front of the name.
+    ( cd "$OUT" && sha256sum -t "$VERSION.img" | tee "$VERSION.img.sha256" )
 fi

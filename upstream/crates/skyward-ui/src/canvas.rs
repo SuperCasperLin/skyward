@@ -266,6 +266,107 @@ impl Canvas {
         }
     }
 
+    /// This canvas seen through a heavy blur, the way a lock screen shows
+    /// the page under it: shrunk `factor` times, each cell standing for the
+    /// block it covers, softened there by a box `radius` wide across and
+    /// down, then stretched back over the whole read between cells, so no
+    /// block shows its edge. Only a canvas held whole is blurred, which the
+    /// screen is.
+    pub fn blurred(&self, factor: u32, radius: u32) -> Canvas {
+        assert!(self.whole(), "only a canvas held whole is blurred");
+        let (w, h) = (self.w, self.h);
+        let (sw, sh) = ((w / factor.max(1)).max(1), (h / factor.max(1)).max(1));
+        // Where block `s` of `cells` starts and ends among `n`: whole
+        // pixels, the remainder spread along them.
+        let block = |s: u32, n: u32, cells: u32| {
+            let from = (s as u64 * n as u64 / cells as u64) as u32;
+            let to = (((s as u64 + 1) * n as u64 / cells as u64) as u32).max(from + 1).min(n);
+            (from, to)
+        };
+        let mut cells: Vec<[f32; 3]> = vec![[0.0; 3]; (sw * sh) as usize];
+        for sy in 0..sh {
+            let (y0, y1) = block(sy, h, sh);
+            for sx in 0..sw {
+                let (x0, x1) = block(sx, w, sw);
+                let mut sum = [0.0f32; 3];
+                for y in y0..y1 {
+                    let row = y as usize * w as usize * 4;
+                    for x in x0..x1 {
+                        let p = row + x as usize * 4;
+                        for (k, s) in sum.iter_mut().enumerate() {
+                            *s += self.data[p + k] as f32;
+                        }
+                    }
+                }
+                let n = ((x1 - x0) * (y1 - y0)) as f32;
+                cells[(sy * sw + sx) as usize] = [sum[0] / n, sum[1] / n, sum[2] / n];
+            }
+        }
+        // A box across and down, twice over: the blocks lose their corners
+        // and what is left is colour rather than shapes.
+        fn box_pass(src: &[[f32; 3]], dst: &mut [[f32; 3]], (sw, sh): (u32, u32), r: i32, across: bool) {
+            let (lines, spots) = if across { (sh, sw) } else { (sw, sh) };
+            for a in 0..lines {
+                for b in 0..spots {
+                    let mut sum = [0.0f32; 3];
+                    let mut n = 0.0;
+                    for d in -r..=r {
+                        let t = b as i32 + d;
+                        if t < 0 || t >= spots as i32 {
+                            continue;
+                        }
+                        let (x, y) = if across { (t as u32, a) } else { (a, t as u32) };
+                        let cell = src[(y * sw + x) as usize];
+                        for (k, s) in sum.iter_mut().enumerate() {
+                            *s += cell[k];
+                        }
+                        n += 1.0;
+                    }
+                    let (x, y) = if across { (b, a) } else { (a, b) };
+                    let cell = &mut dst[(y * sw + x) as usize];
+                    for (k, s) in cell.iter_mut().enumerate() {
+                        *s = sum[k] / n;
+                    }
+                }
+            }
+        }
+        let r = radius as i32;
+        if r > 0 {
+            let mut other = vec![[0.0f32; 3]; cells.len()];
+            for _ in 0..2 {
+                for across in [true, false] {
+                    box_pass(&cells, &mut other, (sw, sh), r, across);
+                    std::mem::swap(&mut cells, &mut other);
+                }
+            }
+        }
+        // Stretched back over the whole, each line of it read between two
+        // cells of the small, so the blocks come back as a smooth wash.
+        let between = |s: u32, n: u32, cells: u32| {
+            let f = ((s as f32 + 0.5) * (cells as f32 / n as f32) - 0.5).max(0.0);
+            let i = (f.floor() as u32).min(cells - 1);
+            let j = (i + 1).min(cells - 1);
+            (i as usize, j as usize, f - i as f32)
+        };
+        let cols: Vec<(usize, usize, f32)> = (0..w).map(|x| between(x, w, sw)).collect();
+        let mut out = Canvas::filled(w, h, Rgba::rgb(0, 0, 0));
+        let span = sw as usize;
+        for y in 0..h {
+            let (sy0, sy1, ty) = between(y, h, sh);
+            let row = y as usize * w as usize * 4;
+            for (x, &(sx0, sx1, tx)) in cols.iter().enumerate() {
+                let p = row + x * 4;
+                for k in 0..3 {
+                    let (a, b) = (cells[sy0 * span + sx0][k], cells[sy0 * span + sx1][k]);
+                    let (c, d) = (cells[sy1 * span + sx0][k], cells[sy1 * span + sx1][k]);
+                    let v = (a + (b - a) * tx) * (1.0 - ty) + (c + (d - c) * tx) * ty;
+                    out.data[p + k] = v.round().clamp(0.0, 255.0) as u8;
+                }
+            }
+        }
+        out
+    }
+
     /// Dim this opaque canvas toward black, keeping `level` of its light.
     pub fn dim(&mut self, level: f32) {
         let keep = (level.clamp(0.0, 1.0) * 256.0).round() as u32;
@@ -275,6 +376,37 @@ impl Canvas {
         for p in self.data.as_chunks_mut::<4>().0 {
             *p = darken(*p, keep);
         }
+    }
+
+    /// Push the colours of this canvas away from their own grey by
+    /// `amount` — 1.0 leaves them, 0.0 makes it monochrome, above 1.0
+    /// deepens them. A blur washes colour out to the average of the blocks
+    /// it covers, and a pane of glass does not: it keeps what it shows
+    /// coloured, so a blurred page is brought back up before it is used.
+    pub fn saturate(&mut self, amount: f32) {
+        for p in self.data.as_chunks_mut::<4>().0 {
+            let grey = (p[0] as f32 * 0.299 + p[1] as f32 * 0.587 + p[2] as f32 * 0.114).round();
+            for k in 0..3 {
+                let v = grey + (p[k] as f32 - grey) * amount;
+                p[k] = v.round().clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+
+    /// The average light of this canvas, 0 at black and 255 at white, by
+    /// the weight the eye gives each of the three. What decides whether a
+    /// pane is a light one, over which the words are dark, or a dark one,
+    /// over which they are light.
+    pub fn luma(&self) -> f32 {
+        let px = self.data.as_chunks::<4>().0;
+        if px.is_empty() {
+            return 0.0;
+        }
+        let sum: f64 = px
+            .iter()
+            .map(|p| p[0] as f64 * 0.2126 + p[1] as f64 * 0.7152 + p[2] as f64 * 0.0722)
+            .sum();
+        (sum / px.len() as f64) as f32
     }
 
     /// Lay `layer`, whose top-left corner goes at (`x`, `y`), over this
@@ -1206,6 +1338,38 @@ mod tests {
         assert_eq!(&pixels[..3], &[10, 20, 30], "the color whatever the alpha, as the panel shows it");
         assert_eq!(&pixels[15..18], &[200, 100, 50]);
         assert_eq!(&pixels[3..6], &[243, 243, 243]);
+    }
+
+    #[test]
+    fn colours_are_pushed_away_from_their_own_grey() {
+        let one = |px: [u8; 4], amount: f32| {
+            let mut c = Canvas::filled(1, 1, Rgba::rgb(0, 0, 0));
+            c.data[..4].copy_from_slice(&px);
+            c.saturate(amount);
+            [c.data[0], c.data[1], c.data[2]]
+        };
+        // A red the blur has faded comes back deepened: its grey, which is
+        // what a blur would have left of it, stays where it is, and the
+        // distance from that grey grows.
+        assert_eq!(one([200, 100, 100, 255], 1.0), [200, 100, 100], "1.0 leaves it as it was");
+        assert_eq!(one([200, 100, 100, 255], 0.0), [130, 130, 130], "0.0 is the grey a blur leaves");
+        assert_eq!(one([200, 100, 100, 255], 1.5), [235, 85, 85], "1.5 deepens what the pane shows");
+        assert_eq!(one([243, 243, 243, 255], 1.5), [243, 243, 243], "a grey has no colour to deepen");
+    }
+
+    #[test]
+    fn the_light_a_pane_carries_is_read_by_the_eyes_weights() {
+        let of = |px: [u8; 4]| {
+            let mut c = Canvas::filled(1, 1, Rgba::rgb(0, 0, 0));
+            c.data[..4].copy_from_slice(&px);
+            c.luma()
+        };
+        assert!((of([255, 255, 255, 255]) - 255.0).abs() < 0.01, "white is all the light");
+        assert!(of([0, 0, 0, 255]) < 0.01, "black is none of it");
+        // Green carries most of it, then red, then blue.
+        assert!((of([0, 255, 0, 255]) - 182.4).abs() < 0.1);
+        assert!((of([255, 0, 0, 255]) - 54.2).abs() < 0.1);
+        assert!((of([0, 0, 255, 255]) - 18.4).abs() < 0.1);
     }
 
     #[test]

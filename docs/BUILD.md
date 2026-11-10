@@ -40,12 +40,13 @@ bash build.sh
 产物：
 
 ```
-upstream/target/out/SW-v0.2.0-nuwa-v0.2.1/
-├── skyward-nuwa.img
-└── skyward-nuwa.img.sha256
+upstream/target/out/SW-v0.2.0-nuwa-v0.2.2/
+├── SW-v0.2.0-nuwa-v0.2.2.img
+└── SW-v0.2.0-nuwa-v0.2.2.img.sha256
 ```
 
-镜像名里的版本来自仓库根的 `VERSION` 文件。
+镜像名里的版本来自仓库根的 `VERSION` 文件，镜像文件与它所在的文件夹同名，拷出去单独
+放也认得出是哪一版。
 
 ## 分步构建
 

@@ -13,7 +13,7 @@ use skyward_ui::app::{
     Action, Adding, App, Asked, BackupAt, BackupEnd, BackupEntry, BackupJob, BackupRefusal, Choice, Clip, Damage, Data, DownloadEnd,
     DownloadJob, EraseStop, Field, FileKind, FileOp, FileRow, FileTask, FsAction, FsRow, Have, Held, Install, ItemEnd, JobEnd, Key, Keys,
     MountFailure, MountRow, Part, PartKind, PartStop, Pick, Place, Screen, SkywardEnd, SkywardJob, SkywardStage, Source, SystemChoice,
-    SystemsWork, TermEnd, Touch, UsbDrive, UsbLink, SCREEN_OFF,
+    SystemsWork, TermEnd, Touch, UsbDrive, UsbLink, LOCK_INK_DARK, LOCK_INK_FOLLOW, SCREEN_OFF,
 };
 use skyward_ui::widgets::{self, Bar, Bolt, Cap, Layer};
 use skyward_ui::{editor, fmt, pages, Canvas, Ctx, Fonts, Lang, Theme};
@@ -153,10 +153,23 @@ fn main() -> Result<()> {
         eprintln!("font: {}", font.display());
         let (w, h) = (cfg.display.width, cfg.display.height);
         if looking == Some("--lock") {
-            let locks = [("lock-slide.png", 91_000u64, false, false), ("lock-code.png", 91_000, true, false), ("lock-code-wrong.png", 94_000, true, true)];
-            for (name, now, coded, wrong) in locks {
+            // The battery the panel reads, in the three states the bar
+            // knows: 57% off the charger takes the words' ink, which over
+            // this light pane is the dark one and over the dark pane below
+            // is the light one; 8% is the red the bar warns with; and 37%
+            // on the charger is the bar's green with a yellow bolt in it.
+            let locks = [
+                ("lock-slide.png", 91_000u64, false, false, false, LOCK_INK_FOLLOW, 57, Charge::Discharging),
+                ("lock-code.png", 91_000, true, false, false, LOCK_INK_FOLLOW, 57, Charge::Discharging),
+                ("lock-code-wrong.png", 94_000, true, true, false, LOCK_INK_FOLLOW, 57, Charge::Discharging),
+                // The dark mode's own pane, and the words it gives.
+                ("lock-dark.png", 91_000, false, false, true, LOCK_INK_DARK, 57, Charge::Discharging),
+                ("lock-charging.png", 91_000, false, false, false, LOCK_INK_FOLLOW, 37, Charge::Charging),
+                ("lock-low.png", 91_000, false, false, false, LOCK_INK_FOLLOW, 8, Charge::Discharging),
+            ];
+            for (name, now, coded, wrong, dark, ink, level, charge) in locks {
                 let path = out.join(name);
-                write_png(&path, &lock(&fonts, &cfg, w, h, "08:14", now, coded, wrong))?;
+                write_png(&path, &lock(&fonts, &cfg, w, h, "08:14", now, coded, wrong, dark, ink, level, charge))?;
                 println!("wrote {}", path.display());
             }
             return Ok(());
@@ -1064,7 +1077,7 @@ fn main() -> Result<()> {
     }
 
     // The panel mid-gesture, to set beside recordings of the same moves.
-    let moments: [Moment; 29] = [
+    let moments: [Moment; 30] = [
         // A code given four digits, and the page asking for it again with
         // two of the second telling typed.
         ("07-set-code", Screen::SetCode, false, &|app, f| {
@@ -1074,6 +1087,13 @@ fn main() -> Result<()> {
             let at = type_keys(app, f, &info, &[Cap::Char('5'), Cap::Char('1'), Cap::Char('3'), Cap::Char('9')], 200);
             let at = type_keys(app, f, &info, &[Cap::Enter], at + 200);
             type_keys(app, f, &info, &[Cap::Char('5'), Cap::Char('1')], at + 200)
+        }),
+        // The three ways the lock screen's words can take their colour, with
+        // the dark one chosen.
+        ("07c-lock-ink", Screen::LockInk, false, &|app, _| {
+            app.state.lock_ink = LOCK_INK_DARK;
+            app.refresh();
+            2000
         }),
         ("08-about-light", Screen::About, false, &|_, _| 2000),
         ("08-about-dark", Screen::About, true, &|_, _| 2000),
@@ -1575,7 +1595,13 @@ fn aod(f: &Fonts, cfg: &DeviceConfig, w: u32, h: u32, clock: &str, now: u64) -> 
     app.set_day(fmt::aod_date(lang(), 1_794_000_000, 0));
     app.tick(90_000);
     app.tick(now);
-    let info = nezha(cfg);
+    // The battery this frame reads, in place of the previewed phone's own:
+    // off the charger, so the clock shows the reading at rest rather than
+    // whatever the cable happens to be doing while these are drawn.
+    let mut info = nezha(cfg);
+    if let Some(b) = info.battery.as_mut() {
+        *b = Battery { level: 57, charge: Charge::Discharging, plugged: false, ..b.clone() };
+    }
     let mut c = Canvas::new(w, h);
     app.compose(&mut c, f, &info, clock, now);
     c
@@ -1584,9 +1610,11 @@ fn aod(f: &Fonts, cfg: &DeviceConfig, w: u32, h: u32, clock: &str, now: u64) -> 
 /// The lock screen, as the panel shows it after going off with the lock
 /// on: the slide that opens it, or the keypad the code is typed on, the
 /// last with a code just turned down.
-fn lock(f: &Fonts, cfg: &DeviceConfig, w: u32, h: u32, clock: &str, now: u64, coded: bool, wrong: bool) -> Canvas {
+#[allow(clippy::too_many_arguments)]
+fn lock(f: &Fonts, cfg: &DeviceConfig, w: u32, h: u32, clock: &str, now: u64, coded: bool, wrong: bool, dark: bool, ink: usize, level: u8, charge: Charge) -> Canvas {
     let mut app = App::new(Screen::Home, w, h, cfg.display.density as f32 / 160.0);
     app.state.lang = lang();
+    app.state.dark = dark;
     app.state.aod = true;
     app.state.screen_off = 1;
     app.tick(0);
@@ -1598,6 +1626,7 @@ fn lock(f: &Fonts, cfg: &DeviceConfig, w: u32, h: u32, clock: &str, now: u64, co
         app.state.lock_code = "s1$6$00112233445566778899aabbccddeeff$e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_string();
     }
     app.state.lock = true;
+    app.state.lock_ink = ink;
     app.lock_now(now);
     // A finger on the dark panel lights it and leaves the lock screen up,
     // which is how it is met.
@@ -1608,6 +1637,11 @@ fn lock(f: &Fonts, cfg: &DeviceConfig, w: u32, h: u32, clock: &str, now: u64, co
     let now = now + 400;
     app.tick(now);
     if coded {
+        // A code set is asked for once the slide is made: the pull brings
+        // up the keypad, and four digits are typed on it.
+        app.touch(Touch::Down(w as f32 / 2.0, h as f32 * 0.70), f, now + 100);
+        app.touch(Touch::Move(w as f32 / 2.0, h as f32 * 0.45), f, now + 200);
+        app.touch(Touch::Up, f, now + 300);
         for ch in "5139".chars() {
             app.lock_key(Cap::Char(ch));
         }
@@ -1615,7 +1649,10 @@ fn lock(f: &Fonts, cfg: &DeviceConfig, w: u32, h: u32, clock: &str, now: u64, co
     if wrong {
         app.code_checked(false, now);
     }
-    let info = nezha(cfg);
+    let mut info = nezha(cfg);
+    if let Some(b) = info.battery.as_mut() {
+        *b = Battery { level, charge, plugged: matches!(charge, Charge::Charging | Charge::Full), ..b.clone() };
+    }
     let mut c = Canvas::new(w, h);
     app.compose(&mut c, f, &info, clock, now);
     c

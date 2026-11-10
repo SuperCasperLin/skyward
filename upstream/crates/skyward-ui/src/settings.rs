@@ -5,7 +5,7 @@
 //! a time zone, a part or a place by its name, so a later version that lists
 //! them otherwise reads them the same.
 
-use crate::app::{Place, State, SCREEN_OFF, TIME_ZONES};
+use crate::app::{Place, State, LOCK_INK_WAYS, SCREEN_OFF, TIME_ZONES};
 use crate::Lang;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -16,6 +16,9 @@ pub const WAIT_MS: u64 = 2000;
 
 /// The parts a backup takes, by name, in the order of the backup page.
 const PARTS: [&str; 4] = ["boot", "system", "data", "modem"];
+/// The colours the lock screen's words can be held in, by name, in the
+/// order of the page that offers them.
+const LOCK_INKS: [&str; LOCK_INK_WAYS] = ["follow", "light", "dark"];
 /// Where a backup goes, by name.
 const STORAGE: &str = "storage";
 const USB_DRIVE: &str = "usb_drive";
@@ -50,6 +53,11 @@ pub struct Settings {
     /// The code that opens the lock screen, salted and hashed; empty for a
     /// slide alone.
     pub lock_code: String,
+    /// The colour the lock screen's words are drawn in, by name: follow,
+    /// light or dark.
+    pub lock_ink: String,
+    /// The lock screen shows the battery under its clock.
+    pub lock_battery: bool,
     /// The time zone, by its name in the tz database.
     pub time_zone: String,
     pub vibrate: bool,
@@ -133,6 +141,8 @@ impl Settings {
             aod: state.aod,
             lock: state.lock,
             lock_code: state.lock_code.clone(),
+            lock_ink: LOCK_INKS.get(state.lock_ink).copied().unwrap_or(LOCK_INKS[0]).to_string(),
+            lock_battery: state.lock_battery,
             time_zone: TIME_ZONES[state.time_zone].2.to_string(),
             vibrate: state.vibrate,
             vibration: state.vibration,
@@ -190,6 +200,10 @@ impl Settings {
         state.aod = self.aod;
         state.lock = self.lock;
         state.lock_code = self.lock_code.clone();
+        state.lock_battery = self.lock_battery;
+        if let Some(at) = LOCK_INKS.iter().position(|way| *way == self.lock_ink) {
+            state.lock_ink = at;
+        }
         if let Some(at) = TIME_ZONES.iter().position(|zone| zone.2 == self.time_zone) {
             state.time_zone = at;
         }
@@ -341,11 +355,12 @@ mod tests {
 
     #[test]
     fn each_value_is_kept_as_what_it_means() {
-        let state = State { screen_off: 3, time_zone: 1, backup: [true, false, false, true], ..State::default() };
+        let state = State { screen_off: 3, time_zone: 1, lock_ink: 2, backup: [true, false, false, true], ..State::default() };
         let text = Settings::of(&state).text();
         let json: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(json["screen_off"], 120, "two minutes, in seconds");
         assert_eq!(json["time_zone"], "Asia/Hong_Kong");
+        assert_eq!(json["lock_ink"], "dark", "the way kept by the name it reads as");
         assert_eq!(json["backup"]["parts"], serde_json::json!(["boot", "modem"]));
         assert_eq!(json["logs"]["to"], "temporary");
         assert_eq!(json["spoken"], "zh-Hans");

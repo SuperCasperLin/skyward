@@ -2,7 +2,7 @@ use crate::app::{
     Action, BackupAt, BackupEnd, BackupJob, Check, ClashChoice, Confirm, Damage, Data, Dock, DownloadEnd, EraseStop, Field, FileKind,
     FileOp, FileTask, Fold, Folder, Frame, FsAction, FsChoice, FsRow, Have, HeroArt, Hit, Install, JobEnd, Keys, Pick, Place, Rows, Screen,
     SkywardCheck, SkywardEnd, SkywardJob, SkywardStage, Slider, Source, State, Switch, SystemsWork, Target, UsbDrive, UsbLink, Wipe, ADDABLE,
-    BACKUP_PARTS, DATA_ERASED, DATA_PARTITION, DOWNLOADS, FASTBOOT_CHOICES, SCREEN_OFF, TARGETS, TIME_ZONES, USB_DRIVE_UNREADABLE,
+    BACKUP_PARTS, DATA_ERASED, DATA_PARTITION, DOWNLOADS, FASTBOOT_CHOICES, LOCK_INK_WAYS, SCREEN_OFF, TARGETS, TIME_ZONES, USB_DRIVE_UNREADABLE,
     USB_DRIVE_WANTED, WIPES, installs, starting,
 };
 use crate::canvas::Canvas;
@@ -98,6 +98,7 @@ pub fn render(screen: Screen, cx: &Ctx) -> Frame {
         Screen::FontLicense => font_license(cx),
         Screen::Slot => slot(cx),
         Screen::SetCode => set_code(cx),
+        Screen::LockInk => lock_ink(cx),
         Screen::Systems => systems(cx),
         Screen::Fastboot => fastboot(cx),
         Screen::Erase => erase(cx),
@@ -170,6 +171,7 @@ const SCREEN_TIMEOUT: Text = ["息屏时间", "螢幕自動關閉", "Screen time
 const AOD: Text = ["息屏显示", "息屏顯示", "Always-on display"];
 const LOCK: Text = ["锁屏", "鎖屏", "Lock screen"];
 const LOCK_CODE: Text = ["解锁密码", "解鎖密碼", "Unlock code"];
+const LOCK_BATTERY: Text = ["锁屏电量", "鎖屏電量", "Lock screen battery"];
 const CODE_NONE: Text = ["未设置，上滑解锁", "未設定，上滑解鎖", "Not set, swipe to unlock"];
 const CODE_SET: Text = ["已设置", "已設定", "Set"];
 const UPDATE: Text = ["系统更新", "系統更新", "System update"];
@@ -385,9 +387,15 @@ pub fn settings(cx: &Ctx) -> Frame {
     let mut lock_rows = vec![Row::new(l.pick(LOCK)).icon(SLATE, Icon::Lock).trail(Trail::Switch(s.lock))];
     let mut lock_ops = vec![Action::Toggle(Switch::Lock)];
     if s.lock {
+        // The battery under the clock, which needs the lock screen to show
+        // at all: with the panel unlocked there is nothing to draw it on.
+        lock_rows.push(Row::new(l.pick(LOCK_BATTERY)).icon(GREEN, Icon::Battery).trail(Trail::Switch(s.lock_battery)));
+        lock_ops.push(Action::Toggle(Switch::LockBattery));
         let code = if s.lock_code.is_empty() { l.pick(CODE_NONE) } else { l.pick(CODE_SET) };
         lock_rows.push(Row::new(l.pick(LOCK_CODE)).icon(PURPLE, Icon::Shield).trail(Trail::Value(code)));
         lock_ops.push(Action::Open(Screen::SetCode));
+        lock_rows.push(Row::new(l.pick(LOCK_INK)).icon(BLUE, Icon::Log).trail(Trail::Choice(l.pick(INK_WAYS[s.lock_ink]))));
+        lock_ops.push(Action::Open(Screen::LockInk));
     }
     let locks = widgets::list(&mut c, t, f, lock_y, &lock_rows);
     out.extend(hits(&locks.rows, &lock_ops));
@@ -842,6 +850,42 @@ fn code(cx: &Ctx, mut c: Canvas, user: u32, keys: Keys, checking: bool) -> Frame
 
 /// What a slot is shown as where the boot control could not be read.
 const UNREADABLE: Text = ["无法读取", "無法讀取", "Unreadable"];
+
+/// The colour the lock screen's words are drawn in: the one the pane under
+/// them calls for, or a colour held whatever the pane is.
+pub fn lock_ink(cx: &Ctx) -> Frame {
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    let mut c = page(cx);
+    let top = t.m.content_top;
+    // The light way gives the words a light system's, which are the dark
+    // ones; the dark way gives them a dark system's.
+    let subs = [Some(l.pick(INK_AS_PAGE)), Some(l.pick(INK_DARKER)), Some(l.pick(INK_WHITE))];
+    let rows: Vec<Row> = (0..LOCK_INK_WAYS)
+        .map(|k| {
+            let row = Row::new(l.pick(INK_WAYS[k])).trail(Trail::Check(s.lock_ink == k));
+            subs[k].map_or(row, |sub| row.subtitle(sub))
+        })
+        .collect();
+    let ways = widgets::list(&mut c, t, f, top, &rows);
+    let picks: Vec<Action> = (0..LOCK_INK_WAYS).map(Action::LockInk).collect();
+    widgets::footnote(&mut c, t, f, ways.bottom, l.pick(INK_NOTE));
+    Frame::new(t, c, hits(&ways.rows, &picks), l.pick(LOCK_INK), top)
+}
+
+const LOCK_INK: Text = ["锁屏文字", "鎖屏文字", "Lock screen words"];
+const INK_WAYS: [Text; LOCK_INK_WAYS] = [
+    ["跟随系统", "跟隨系統", "Follow the system"],
+    ["浅色", "淺色", "Light"],
+    ["深色", "深色", "Dark"],
+];
+const INK_AS_PAGE: Text = ["按背景明暗自动", "按背景明暗自動", "As the backdrop is"];
+const INK_DARKER: Text = ["深色文字", "深色文字", "Dark words"];
+const INK_WHITE: Text = ["白色文字", "白色文字", "White words"];
+const INK_NOTE: Text = [
+    "锁屏的背景是即将进入的页面的模糊样子，几乎透明，颜色的深浅跟着页面走。跟随系统时，锁屏上的字自己挑深浅；也可以按模式定下来：浅色模式用深色字，深色模式用白色字。",
+    "鎖屏的背景是即將進入的頁面的模糊樣子，幾乎透明，顏色的深淺跟著頁面走。跟隨系統時，鎖屏上的字自己挑深淺；也可以按模式定下來：淺色模式用深色字，深色模式用白色字。",
+    "The lock screen's backdrop is the page about to open, blurred and nearly clear, so its shade is the page's. Following the system, the words take whichever of light and dark they can be read in; they can also be fixed by mode: dark words in the light mode, white ones in the dark.",
+];
 
 /// The code the recovery's own lock screen is opened with: what it is for,
 /// the dots of what has been typed, and the keypad it is typed on.

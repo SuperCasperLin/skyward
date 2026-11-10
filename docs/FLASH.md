@@ -32,10 +32,13 @@ adb pull /sdcard/stock-recovery-nuwa.img
 
 ## 刷入
 
+镜像文件名与版本号一致，例如 `SW-v0.2.0-nuwa-v0.2.2.img`；先核对同名 `.sha256`：
+
 ```bash
+sha256sum -c SW-v0.2.0-nuwa-v0.2.2.img.sha256
 adb reboot bootloader
 fastboot devices
-fastboot flash recovery skyward-nuwa.img
+fastboot flash recovery SW-v0.2.0-nuwa-v0.2.2.img
 fastboot reboot recovery
 ```
 

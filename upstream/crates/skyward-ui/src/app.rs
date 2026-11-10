@@ -103,6 +103,9 @@ pub enum Screen {
     /// The code the recovery's own lock screen is opened with: typed twice,
     /// the second time to be sure of the first.
     SetCode,
+    /// The colour the lock screen's words are drawn in: the one the pane
+    /// under them calls for, or a colour held whatever the pane is.
+    LockInk,
     /// The installed system and the one Skyward installed beside it: which
     /// of them starts, switching between them, and taking the other away.
     Systems,
@@ -566,6 +569,8 @@ pub enum Switch {
     Aod,
     /// Lock the panel when it goes off.
     Lock,
+    /// Show the battery under the lock screen's clock, beside its level.
+    LockBattery,
 }
 
 /// What a backup can take, in the order the backup page lists it.
@@ -1211,6 +1216,9 @@ pub enum Action {
     ScreenOff(usize),
     /// Keep the time zone at this place in [`TIME_ZONES`].
     TimeZone(usize),
+    /// Draw the lock screen's words in the colour at this place in
+    /// [`LOCK_INK_WAYS`].
+    LockInk(usize),
     /// Speak this language.
     Language(Lang),
     /// Tick or untick a part of the backup, by its place in
@@ -1605,6 +1613,12 @@ pub struct State {
     /// The code the lock screen is opened with, salted and hashed; empty
     /// while a slide alone opens it.
     pub lock_code: String,
+    /// The colour the lock screen's words are drawn in, by its place among
+    /// [`LOCK_INK_WAYS`].
+    pub lock_ink: usize,
+    /// The lock screen shows the battery under its clock, beside the level's
+    /// figures.
+    pub lock_battery: bool,
     /// The code being set on the code page: what has been typed, and the
     /// first of the two entries once it has been made.
     pub code_entry: Option<CodeEntry>,
@@ -1791,6 +1805,10 @@ impl Default for State {
             // panel has gone off: a recovery just started is in a hand.
             lock: true,
             lock_code: String::new(),
+            // The words take the colour the pane under them calls for, which
+            // is the colour the system's own pages would give them.
+            lock_ink: LOCK_INK_FOLLOW,
+            lock_battery: true,
             code_entry: None,
             time_zone: 0,
             vibrate: true,
@@ -2508,9 +2526,77 @@ const LOCK_PULL_DP: f32 = 220.0;
 /// How long the words that turn a code down stay under it.
 const LOCK_WRONG_MS: u64 = 4000;
 
-/// The lock screen's inks on the page it covers.
+/// How many times over the page under the lock screen is shrunk before it
+/// is blurred and stretched back: what is left of it is colour, not words.
+const LOCK_BLUR_SHRINK: u32 = 6;
+
+/// How wide a box the shrunk page is softened by, counted in its own cells.
+const LOCK_BLUR_RADIUS: u32 = 3;
+
+/// How far the blurred page's colours are pushed past the grey a blur
+/// leaves them at, so the pane keeps the page's hue instead of washing it
+/// out: a frosted pane deepens what it shows rather than flattening it.
+const LOCK_COLOUR: f32 = 1.55;
+
+/// The lock screen's inks on the page it covers: light words over a dark
+/// page, and the other way about over a light one, decided by how much
+/// light the pane under them carries.
 const LOCK_INK: Rgba = Rgba::rgb(0xF2, 0xF2, 0xF2);
 const LOCK_DIM: Rgba = Rgba::rgb(0x9A, 0x9A, 0x9A);
+const LOCK_MARK: Rgba = Rgba::rgb(0x1A, 0x1A, 0x1A);
+const LOCK_MARK_DIM: Rgba = Rgba::rgb(0x52, 0x52, 0x52);
+
+/// The light of the pane below which the lock screen's words go light: the
+/// point where a white word stops being read over it.
+const LOCK_LIGHT: f32 = 128.0;
+
+/// The battery the lock screen keeps under its clock, in dp: the body's
+/// width and height, the cap past it and its own height, the room the level
+/// leaves between itself and the body's edge, the line the body is drawn
+/// with, and the room between the battery and the figures beside it.
+const LOCK_BATTERY_W_DP: f32 = 26.0;
+const LOCK_BATTERY_H_DP: f32 = 12.5;
+const LOCK_BATTERY_NUB_DP: (f32, f32) = (2.4, 6.2);
+const LOCK_BATTERY_PAD_DP: f32 = 2.0;
+const LOCK_BATTERY_STROKE_DP: f32 = 1.3;
+const LOCK_BATTERY_GAP_DP: f32 = 7.0;
+
+/// The green the lock screen's battery is filled with while a charger is
+/// on, the same one the stock bar turns: plugged in is the one state the
+/// bar colours, and the lock screen keeps the colour for the same reason.
+const LOCK_BATTERY_GREEN: Rgba = Rgba::rgb(0x1D, 0xCD, 0x3A);
+
+/// The red it turns below this level with no charger on, as the stock bar
+/// warns, at the bar's own mark rather than one of the lock screen's.
+const LOCK_BATTERY_LOW: Rgba = Rgba::rgb(0xE6, 0x4B, 0x3B);
+const LOCK_BATTERY_LOW_LEVEL: u8 = 20;
+
+/// The yellow the bolt is drawn in, whatever colour the battery under it
+/// has taken: a charger is neither a level nor a warning, and a third
+/// colour says so without a word. A bolt is yellow wherever a bolt is
+/// drawn, so it is the one part of the reading that does not follow the
+/// pane.
+const LOCK_BOLT_YELLOW: Rgba = Rgba::rgb(0xFF, 0xD6, 0x0A);
+
+/// The bolt drawn inside a battery while a charger is on, its box in dp,
+/// and the two convex halves it is made of, its corner at (0, 0).
+const LOCK_BOLT_W_DP: f32 = 5.6;
+const LOCK_BOLT_H_DP: f32 = 9.0;
+const LOCK_BOLT_TOP: [(f32, f32); 4] = [(0.57, 0.0), (0.0, 0.58), (0.40, 0.58), (0.57, 0.42)];
+const LOCK_BOLT_FOOT: [(f32, f32); 4] = [(0.40, 0.58), (0.31, 1.0), (1.0, 0.42), (0.57, 0.42)];
+
+/// How many ways the lock screen's words can take their colour, and which
+/// is which: the one the pane under them calls for, or the one a light or
+/// a dark system gives them. A pane is let through almost whole, so its
+/// colour is the system's, and following it is following the system — the
+/// other two ways are for a hand that wants the words kept one way even
+/// where the system has gone the other.
+pub const LOCK_INK_WAYS: usize = 3;
+pub const LOCK_INK_FOLLOW: usize = 0;
+/// The words a light system gives: dark ones, over its light pages.
+pub const LOCK_INK_LIGHT: usize = 1;
+/// The words a dark system gives: light ones, over its dark pages.
+pub const LOCK_INK_DARK: usize = 2;
 
 /// The shortest and the longest code the lock screen takes, in digits: the
 /// same as the hashing side keeps, which refuses anything else.
@@ -2801,6 +2887,18 @@ pub struct App {
     lock_typed: String,
     /// When a code was last turned down, for the words that say so.
     lock_wrong: Option<u64>,
+    /// The slide has been made on a lock screen with a code, and the keypad
+    /// stands where it was: this is what a code set adds to the slide, not
+    /// what stands in its place.
+    lock_asking: bool,
+    /// The page under the lock screen, blurred, made once for each time the
+    /// panel locks: a pull redraws the lock screen a frame at a time, and
+    /// what lies under it does not change while the lock stands.
+    lock_backdrop: Option<Canvas>,
+    /// Whether the pane under the lock screen is a dark one, and so takes
+    /// the light words rather than the dark — or, where the settings hold
+    /// one colour, whether that colour is the light one.
+    lock_dark: bool,
 
     /// When the shift key was last tapped, for telling a second tap in a
     /// row from one on its own.
@@ -2911,6 +3009,9 @@ impl App {
             lock_pressed: None,
             lock_typed: String::new(),
             lock_wrong: None,
+            lock_asking: false,
+            lock_backdrop: None,
+            lock_dark: true,
             shift_at: None,
             charging: None,
             charge_art: None,
@@ -3323,23 +3424,40 @@ impl App {
     /// panel that locks, not the setting: what the settings page keeps is
     /// left as it is.
     pub fn lock_now(&mut self, now: u64) {
+        self.lock_put();
+        self.dirty = true;
+        self.stir(now);
+    }
+
+    /// The lock screen put back to how it is first met: the slide at its
+    /// foot, nothing typed, no words said, and the page under it to be
+    /// drawn again for what is seen through it.
+    fn lock_put(&mut self) {
         self.locked = true;
         self.pulled = 0.0;
         self.lock_from = None;
         self.lock_typed.clear();
         self.lock_wrong = None;
         self.lock_pressed = None;
-        self.dirty = true;
-        self.stir(now);
+        self.lock_asking = false;
+        self.lock_backdrop = None;
     }
 
-    /// What a finger on the lock screen does: pull the slide up, or type on
-    /// the keypad when the code is set.
+    /// A tap of the motor, where the settings have it on.
+    fn buzz(&self) -> Vec<Effect> {
+        if self.state.vibrate {
+            vec![Effect::Haptic]
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// What a finger on the lock screen does: pull the slide up, and once a
+    /// code is set and the slide is made, type it on the keypad.
     fn lock_touch(&mut self, ev: Touch, now: u64) -> Vec<Effect> {
         self.stir(now);
-        let coded = !self.state.lock_code.is_empty();
         match ev {
-            Touch::Down(x, y) if coded => {
+            Touch::Down(x, y) if self.lock_asking => {
                 let t = self.theme();
                 let top = t.m.h as f32 - widgets::keypad_height(&t);
                 let key = widgets::keypad_rects(&t, top).into_iter().find(|(rect, _)| rect.contains(x, y)).map(|(_, cap)| cap);
@@ -3365,7 +3483,7 @@ impl App {
                 }
                 Vec::new()
             }
-            Touch::Up if coded => {
+            Touch::Up if self.lock_asking => {
                 let pressed = self.lock_pressed.take();
                 self.dirty = true;
                 match pressed {
@@ -3377,41 +3495,69 @@ impl App {
                 let pulled = std::mem::take(&mut self.pulled);
                 let pulled_up = self.lock_from.take().is_some_and(|_| pulled >= LOCK_SLID);
                 self.dirty = true;
-                if pulled_up {
-                    self.unlock_panel(now);
+                if !pulled_up {
+                    return Vec::new();
                 }
-                Vec::new()
+                let fx = self.buzz();
+                // A code set is asked for after the slide, as on a phone,
+                // where the slide brings up the keypad rather than opening
+                // the page; without one the slide is the whole way in.
+                if self.state.lock_code.is_empty() {
+                    self.unlock_panel(now);
+                } else {
+                    self.ask_code(now);
+                }
+                fx
             }
         }
     }
 
+    /// The slide made on a lock screen with a code: the keypad comes up in
+    /// its place, with nothing typed yet.
+    fn ask_code(&mut self, now: u64) {
+        self.lock_asking = true;
+        self.pulled = 0.0;
+        self.lock_from = None;
+        self.lock_typed.clear();
+        self.lock_wrong = None;
+        self.lock_pressed = None;
+        self.dirty = true;
+        self.stir(now);
+    }
+
     /// A key of the lock screen's keypad: a digit typed, one erased, or the
-    /// code given to be checked.
+    /// code given to be checked. Each of them is a tap of the motor, as the
+    /// phone's own keypad answers a finger.
     pub fn lock_key(&mut self, cap: Cap) -> Vec<Effect> {
         match cap {
             Cap::Char(ch) => {
-                if self.lock_typed.chars().count() < CODE_MAX {
-                    self.lock_typed.push(ch);
-                    self.lock_wrong = None;
+                if self.lock_typed.chars().count() >= CODE_MAX {
+                    return Vec::new();
                 }
+                self.lock_typed.push(ch);
+                self.lock_wrong = None;
             }
             Cap::Backspace => {
-                self.lock_typed.pop();
+                if self.lock_typed.pop().is_none() {
+                    return Vec::new();
+                }
                 self.lock_wrong = None;
             }
             Cap::Enter => {
                 let typed = std::mem::take(&mut self.lock_typed);
+                self.dirty = true;
                 if typed.chars().count() < CODE_MIN {
                     self.lock_typed = typed;
-                    return Vec::new();
+                    return self.buzz();
                 }
-                self.dirty = true;
-                return vec![Effect::CheckCode { recorded: self.state.lock_code.clone(), typed }];
+                let mut fx = self.buzz();
+                fx.push(Effect::CheckCode { recorded: self.state.lock_code.clone(), typed });
+                return fx;
             }
-            _ => {}
+            _ => return Vec::new(),
         }
         self.dirty = true;
-        Vec::new()
+        self.buzz()
     }
 
     /// The runtime checked what was typed against the code kept: the panel
@@ -3434,6 +3580,8 @@ impl App {
         self.lock_typed.clear();
         self.lock_wrong = None;
         self.lock_pressed = None;
+        self.lock_asking = false;
+        self.lock_backdrop = None;
         self.dirty = true;
         self.stir(now);
         self.refresh();
@@ -3574,12 +3722,7 @@ impl App {
         // to make the slide with, and a lock it could not open is a page
         // out of reach.
         if self.state.lock && !self.keys {
-            self.locked = true;
-            self.pulled = 0.0;
-            self.lock_from = None;
-            self.lock_typed.clear();
-            self.lock_wrong = None;
-            self.lock_pressed = None;
+            self.lock_put();
         }
         self.dirty = true;
         self.bright = full_brightness();
@@ -4620,12 +4763,33 @@ impl App {
             return;
         }
         let charge = self.charging.as_ref().map_or(0.0, |c| c.shown.level(now));
-        if charge < 1.0 {
+        // A locked panel's page is drawn once, for the lock screen to be
+        // seen through: it does not change while the lock stands, and
+        // drawing it again a frame at a time under a pull is work that
+        // shows nothing.
+        if charge < 1.0 && !(self.locked && self.lock_backdrop.is_some()) {
             self.compose_page(out, f, info, clock, now);
         }
         // A locked panel shows the lock screen over the page, which waits
         // under it for the slide to be made.
         if self.locked {
+            if self.lock_backdrop.is_none() && charge < 1.0 {
+                let mut seen = out.blurred(LOCK_BLUR_SHRINK, LOCK_BLUR_RADIUS);
+                seen.saturate(LOCK_COLOUR);
+                // Nothing is laid over the page: no grey sheet, no shade at
+                // the head or the foot. What the pane carries decides the
+                // words instead — a light page takes dark words, a dark one
+                // light words, and neither is a grey it has to be rescued
+                // from. So the lock screen is as light as the page it is
+                // seen through. A hand that wants the words other than the
+                // pane would have them holds one colour here.
+                self.lock_dark = match self.state.lock_ink {
+                    LOCK_INK_LIGHT => false,
+                    LOCK_INK_DARK => true,
+                    _ => seen.luma() < LOCK_LIGHT,
+                };
+                self.lock_backdrop = Some(seen);
+            }
             self.compose_lock(out, f, info, clock, now);
         }
         // The charging screen is a panel of its own and covers both: it is
@@ -4653,8 +4817,18 @@ impl App {
             out.text_center(&f.body, &self.aod_day, cx, cy + m.dp(86.0), m.dp(17.0), AOD_DIM);
         }
         if let Some(battery) = &info.battery {
-            let level = format!("{}%", battery.level);
-            out.text_center(&f.label, &level, cx, cy + m.dp(126.0), m.dp(14.0), AOD_BLUE);
+            // The same reading the lock screen gives, a step under the day:
+            // the battery and its level, in the blue this clock keeps — or
+            // in the bar's green and red, and with the bolt, once the
+            // battery has something to say that a colour says better.
+            let plugged = battery.charging();
+            let ink = Self::battery_ink(battery.level, plugged, AOD_BLUE);
+            if self.state.lock_battery {
+                self.compose_battery(out, &t, f, battery.level, plugged, ink, (cx, cy + m.dp(126.0)));
+            } else {
+                let level = format!("{}%", battery.level);
+                out.text_center(&f.label, &level, cx, cy + m.dp(126.0), m.dp(14.0), ink);
+            }
         }
         // For a moment after the screen goes off, the clock says how to
         // bring the pages back.
@@ -4665,30 +4839,146 @@ impl App {
         }
     }
 
-    /// The lock screen: the time over a panel gone dark, and under it the
-    /// slide that opens the pages, or the keypad the code is typed on. It is
-    /// drawn on the dark palette whatever the pages below it use, as the
-    /// phone's own lock screen is dark over a light system.
+    /// The ink the lock screen writes in: light over a dark pane, dark over
+    /// a light one.
+    fn lock_ink(&self) -> Rgba {
+        if self.lock_dark { LOCK_INK } else { LOCK_MARK }
+    }
+
+    /// The same, gone quiet, for the day under the clock and the arrow.
+    fn lock_dim(&self) -> Rgba {
+        if self.lock_dark { LOCK_DIM } else { LOCK_MARK_DIM }
+    }
+
+    /// The lock screen: the time over the page it covers, seen through a
+    /// blur, and under it the slide that brings up the pages, or the keypad
+    /// the code is typed on once the slide has been made. Its inks go light
+    /// or dark with the pane under them, so nothing is laid over the page to
+    /// make room for the words.
     fn compose_lock(&mut self, out: &mut Canvas, f: &Fonts, info: &DeviceInfo, clock: &str, now: u64) {
         let dark = Theme::dark(self.w, self.h, self.px_per_dp);
         let m = dark.m;
         let cx = out.w as f32 / 2.0;
-        out.clear(Rgba::rgb(0, 0, 0));
-        let coded = !self.state.lock_code.is_empty();
+        // What lies under the lock screen, as it was when the panel locked.
+        match &self.lock_backdrop {
+            Some(seen) => out.lay(seen, 0, 0, 1.0),
+            None => out.clear(Rgba::rgb(0, 0, 0)),
+        }
         // With a keypad under it the clock stands higher, above the dots.
-        let cy = out.h as f32 * if coded { 0.20 } else { 0.34 };
-        out.text_center(&f.title, clock, cx, cy, m.dp(96.0), LOCK_INK);
+        let cy = out.h as f32 * if self.lock_asking { 0.20 } else { 0.26 };
+        let ink = self.lock_ink();
+        out.text_center(&f.title, clock, cx, cy, m.dp(96.0), ink);
         if !self.aod_day.is_empty() {
-            out.text_center(&f.body, &self.aod_day, cx, cy + m.dp(74.0), m.dp(17.0), LOCK_DIM);
+            out.text_center(&f.body, &self.aod_day, cx, cy + m.dp(74.0), m.dp(17.0), ink.with_alpha(0xB4));
         }
-        if let Some(battery) = &info.battery {
-            let level = format!("{}%", battery.level);
-            out.text_center(&f.label, &level, cx, cy + m.dp(112.0), m.dp(14.0), AOD_BLUE);
+        if let Some(battery) = info.battery.as_ref() {
+            // The battery and its level stand together under the day: the
+            // battery to the left of the figures, the two centred as one
+            // line, so the reading is the battery's own rather than a
+            // number that could be anything.
+            let plugged = battery.charging();
+            if self.state.lock_battery {
+                let ink = self.lock_battery_ink(battery.level, plugged);
+                self.compose_battery(out, &dark, f, battery.level, plugged, ink, (cx, cy + m.dp(112.0)));
+            } else {
+                let level = format!("{}%", battery.level);
+                let ink = self.lock_battery_ink(battery.level, plugged);
+                out.text_center(&f.label, &level, cx, cy + m.dp(112.0), m.dp(14.0), ink);
+            }
         }
-        if coded {
+        if self.lock_asking {
             self.compose_lock_code(out, f, &dark, cx, now);
         } else {
             self.compose_lock_slide(out, f, &dark, cx);
+        }
+    }
+
+    /// The battery and the level it holds, standing round `at`: the battery
+    /// to the left, the level's figures after it, the two read as one line
+    /// and centred on it. The lock screen and the always-on clock show the
+    /// same reading, so they draw it with the same hand and differ only in
+    /// the ink a battery at rest takes — the pane's for one, the blue this
+    /// clock keeps for the other.
+    fn compose_battery(&self, out: &mut Canvas, t: &Theme, f: &Fonts, level: u8, plugged: bool, ink: Rgba, at: (f32, f32)) {
+        let m = &t.m;
+        let (cx, cy) = at;
+        let (bw, nw) = (m.dp(LOCK_BATTERY_W_DP), m.dp(LOCK_BATTERY_NUB_DP.0));
+        let text = format!("{level}%");
+        let px = m.dp(14.0);
+        let gap = m.dp(LOCK_BATTERY_GAP_DP);
+        let tw = out.text_width(&f.label, &text, px);
+        // The two stand as one line: the battery's body, its cap, the room
+        // between, and the figures, all centred on `cx`.
+        let left = cx - (bw + nw + gap + tw) / 2.0;
+        self.battery_body(out, t, level, plugged, ink, (left + (bw + nw) / 2.0, cy));
+        out.text_center(&f.label, &text, left + bw + nw + gap + tw / 2.0, cy, px, ink);
+    }
+
+    /// The colour the lock screen's battery and its figures take: the bar's
+    /// green while a charger is on, its red once the level is low and none
+    /// is, and otherwise the words' own ink — so a battery at rest is black
+    /// on a light pane and white on a dark one, following the mode with the
+    /// rest of the lock screen.
+    fn lock_battery_ink(&self, level: u8, plugged: bool) -> Rgba {
+        Self::battery_ink(level, plugged, self.lock_ink())
+    }
+
+    /// The colour a battery and its figures take, as the stock bar takes it:
+    /// the red it warns with once the level is low and no charger is, the
+    /// green it fills while a charger is on, and otherwise `rest`, the ink
+    /// the reading keeps wherever it stands.
+    fn battery_ink(level: u8, plugged: bool, rest: Rgba) -> Rgba {
+        if !plugged && level < LOCK_BATTERY_LOW_LEVEL {
+            LOCK_BATTERY_LOW
+        } else if plugged {
+            LOCK_BATTERY_GREEN
+        } else {
+            rest
+        }
+    }
+
+    /// The battery `level` full, centred on `at`: its body, the inside
+    /// filled as far as the level reaches, the cap past it, and, with a
+    /// charger on, the bolt inside that says the level is climbing.
+    fn battery_body(&self, out: &mut Canvas, t: &Theme, level: u8, plugged: bool, ink: Rgba, at: (f32, f32)) {
+        let m = &t.m;
+        let (cx, cy) = at;
+        let (bw, bh) = (m.dp(LOCK_BATTERY_W_DP), m.dp(LOCK_BATTERY_H_DP));
+        let (nw, nh) = (m.dp(LOCK_BATTERY_NUB_DP.0), m.dp(LOCK_BATTERY_NUB_DP.1));
+        let (stroke, pad) = (m.dp(LOCK_BATTERY_STROKE_DP), m.dp(LOCK_BATTERY_PAD_DP));
+        let left = cx - (bw + nw) / 2.0;
+        let (top, r) = (cy - bh / 2.0, m.dp(3.2));
+        // One shape in the colour the figures keep, so the two are read as
+        // one reading: the inside filled as far as the level reaches, the
+        // empty part a trace of the same colour, and a line round it all.
+        // With a charger on, the empty part is filled in a little more
+        // solidly: the bolt stands on it as well as on the fill, and a
+        // yellow bolt needs something to stand on that is not the pane.
+        let (rim, trail) = if plugged {
+            (ink.with_alpha(0xC0), ink.with_alpha(0x52))
+        } else {
+            (ink.with_alpha(0xAA), ink.with_alpha(0x30))
+        };
+        out.fill_round_rect(left, top, bw, bh, r, trail);
+        let room = (bw - pad * 2.0) * level.min(100) as f32 / 100.0;
+        if room > 0.5 {
+            out.fill_round_rect(left + pad, top + pad, room, bh - pad * 2.0, (r - pad).max(m.dp(1.2)), ink);
+        }
+        out.stroke_round_rect(left, top, bw, bh, r, stroke, rim);
+        // The cap sits past the body, half a line into it so the two meet.
+        out.fill_round_rect(left + bw - stroke * 0.6, cy - nh / 2.0, nw + stroke * 0.6, nh, m.dp(1.2), rim);
+        // The bolt is not cut out of the fill: it keeps one colour of its
+        // own, so the reading says three things at once — how much is left,
+        // whether it is filling, and whether the level is worth a word.
+        if plugged {
+            // On the body's middle rather than the whole shape's: the cap
+            // would push it towards the right of what the eye reads as the
+            // battery.
+            let (w, h) = (m.dp(LOCK_BOLT_W_DP), m.dp(LOCK_BOLT_H_DP));
+            let (x, y) = (left + bw / 2.0 - w / 2.0, cy - h / 2.0);
+            let at = |(u, v): (f32, f32)| (x + u * w, y + v * h);
+            out.fill_convex(&LOCK_BOLT_TOP.map(at), LOCK_BOLT_YELLOW);
+            out.fill_convex(&LOCK_BOLT_FOOT.map(at), LOCK_BOLT_YELLOW);
         }
     }
 
@@ -4699,10 +4989,17 @@ impl App {
         let h = out.h as f32;
         let (track_w, track_h) = (m.dp(56.0), m.dp(168.0));
         let track = Rect::new(cx - track_w / 2.0, h - m.dp(96.0) - track_h, track_w, track_h);
-        out.fill_round_rect(track.x, track.y, track.w, track.h, track_w / 2.0, Rgba::rgb(0x1E, 0x1E, 0x1E));
+        // What is under it shows through the track, as it does on a phone's
+        // own lock screen: the shape is the panel's, not a colour of its own,
+        // so it is drawn in whichever of the two inks the pane takes.
+        let (ink, quiet) = (self.lock_ink(), self.lock_dim());
+        out.fill_round_rect(track.x, track.y, track.w, track.h, track_w / 2.0, Rgba::rgb(0x00, 0x00, 0x00).with_alpha(0x18));
+        // A pane keeps an edge where it is cut: a line of light along the
+        // groove is what tells the eye it is a groove rather than a smudge.
+        out.stroke_round_rect(track.x, track.y, track.w, track.h, track_w / 2.0, m.dp(1.0), Rgba::rgb(0xFF, 0xFF, 0xFF).with_alpha(0x38));
         // An arrow at the top of the track brightens as the pull nears its
         // end, as the page's own swipe cue does.
-        let arrow = crate::color::mix(LOCK_DIM, LOCK_INK, self.pulled);
+        let arrow = crate::color::mix(quiet, ink, self.pulled);
         let (ax, ay) = (cx, track.y + m.dp(22.0));
         let s = m.dp(7.0);
         out.line(ax - s, ay + s * 0.4, ax, ay - s * 0.6, m.dp(2.0), arrow);
@@ -4710,11 +5007,14 @@ impl App {
         let knob_r = m.dp(24.0);
         let travel = track.h - knob_r * 2.0 - m.dp(8.0);
         let knob_cy = track.y + track.h - knob_r - m.dp(4.0) - self.pulled * travel;
-        out.fill_circle(cx, knob_cy, knob_r, Rgba::rgb(0xE8, 0xE8, 0xE8));
+        // The knob sits over the pane rather than on it: a soft shadow
+        // under it keeps it off the page it is seen through.
+        out.shadow_round_rect(cx - knob_r, knob_cy - knob_r, knob_r * 2.0, knob_r * 2.0, knob_r, m.dp(9.0), Rgba::rgb(0, 0, 0).with_alpha(0x55));
+        out.fill_circle(cx, knob_cy, knob_r, Rgba::rgb(0xF6, 0xF6, 0xF6));
         // The words stand above the track until the finger carries it up.
         if self.pulled < 0.05 {
             let hint = self.state.lang.pick(["上滑解锁", "上滑解鎖", "Swipe up to unlock"]);
-            out.text_center(&f.label, hint, cx, track.y - m.dp(24.0), m.dp(14.0), LOCK_DIM);
+            out.text_center(&f.label, hint, cx, track.y - m.dp(24.0), m.dp(14.0), ink.with_alpha(0xC8));
         }
     }
 
@@ -4723,10 +5023,28 @@ impl App {
     fn compose_lock_code(&mut self, out: &mut Canvas, f: &Fonts, t: &Theme, cx: f32, now: u64) {
         let m = &t.m;
         let l = self.state.lang;
+        // The keys are panes of their own rather than cards: the page shows
+        // through them, as a phone's own keypad lies over its wallpaper.
+        // Over a dark page they are dark glass with light digits; over a
+        // light one they are white glass with dark digits, and a shade under
+        // each of them lifts it off the page it lies on.
+        let mut glass = *t;
         let top = out.h as f32 - widgets::keypad_height(t);
-        widgets::keypad(out, t, f, l, top, self.lock_pressed, l.pick(["解锁", "解鎖", "Unlock"]));
+        if self.lock_dark {
+            glass.pal.card = Rgba::rgb(0x00, 0x00, 0x00).with_alpha(0x66);
+        } else {
+            glass.pal.card = Rgba::rgb(0xFF, 0xFF, 0xFF).with_alpha(0x86);
+            glass.pal.text = LOCK_MARK;
+            for (r, cap) in widgets::keypad_rects(t, top) {
+                if matches!(cap, Cap::Char(_)) {
+                    out.shadow_round_rect(r.x, r.y, r.w, r.h, r.w / 2.0, m.dp(7.0), Rgba::rgb(0, 0, 0).with_alpha(0x28));
+                }
+            }
+        }
+        widgets::keypad(out, &glass, f, l, top, self.lock_pressed, l.pick(["解锁", "解鎖", "Unlock"]));
         let dots_cy = top - m.dp(52.0);
-        widgets::code_dots(out, t, cx, dots_cy, self.lock_typed.chars().count());
+        glass.pal.accent = self.lock_ink();
+        widgets::code_dots(out, &glass, cx, dots_cy, self.lock_typed.chars().count());
         let wrong = self.lock_wrong.is_some_and(|at| now < at + LOCK_WRONG_MS);
         if wrong {
             let text = l.pick(["密码错误，请重试", "密碼錯誤，請重試", "Wrong code, try again"]);
@@ -5674,6 +5992,7 @@ impl App {
                     Switch::Vibrate => &mut self.state.vibrate,
                     Switch::Aod => &mut self.state.aod,
                     Switch::Lock => &mut self.state.lock,
+                    Switch::LockBattery => &mut self.state.lock_battery,
                     Switch::FileTransfer => &mut self.state.file_transfer,
                     Switch::Compress => &mut self.state.compress,
                     Switch::Verify => &mut self.state.verify,
@@ -5864,6 +6183,14 @@ impl App {
             }
             Action::TimeZone(k) => {
                 self.state.time_zone = k;
+                self.refresh();
+            }
+            Action::LockInk(k) => {
+                self.state.lock_ink = k;
+                // The pane's colour is read once, when it is taken: a way
+                // that holds the words to one colour needs no new reading,
+                // but the way that follows it does.
+                self.lock_backdrop = None;
                 self.refresh();
             }
             Action::Language(l) => {
@@ -6513,9 +6840,10 @@ impl App {
             if self.state.aod && matches!(ev, Touch::Down(..)) {
                 self.wake(now);
                 // A locked panel takes the same finger: the lock screen
-                // comes up under it, and a pull begins where it landed.
+                // comes up under it, and a pull begins where it landed —
+                // unless the keypad is up, which a tap alone does not work.
                 if self.locked {
-                    if let Touch::Down(_, y) = ev {
+                    if let (Touch::Down(_, y), false) = (ev, self.lock_asking) {
                         self.lock_from = Some(y);
                         self.pulled = 0.0;
                     }
@@ -6875,8 +7203,18 @@ impl App {
         }
         // The lock screen stands between the keys and the page as it does
         // between a finger and it: a button other than power presses nothing
-        // under it, and power only turns the panel off again.
+        // under it, and power only turns the panel off again. Back is the
+        // one that goes somewhere in it, putting the keypad away for the
+        // slide it was brought up from.
         if self.locked && key != Key::Power {
+            if key == Key::Back && self.lock_asking {
+                self.lock_asking = false;
+                self.lock_typed.clear();
+                self.lock_wrong = None;
+                self.lock_pressed = None;
+                self.dirty = true;
+                self.stir(now);
+            }
             self.button = Some((key, Press::Spent));
             return fx;
         }
@@ -12017,43 +12355,255 @@ mod tests {
     }
 
     #[test]
-    fn a_code_set_is_what_opens_the_lock_screen() {
+    fn a_code_set_is_asked_for_once_the_slide_is_made() {
         let f = fonts();
         let mut app = App::new(Screen::Home, W, H, PPD);
         // What the runtime keeps: the lock screen only asks whether it is
         // there, and hands the digits to be checked.
         app.state.lock_code = "s1$4$00112233445566778899aabbccddeeff$".to_string() + &"ab".repeat(32);
         app.lock_now(0);
-        // The slide is not the way in once a code is set: the keypad is
-        // all there is to touch, and above it a pull does nothing.
-        app.touch(Touch::Down(700.0, 900.0), &f, 100);
-        app.touch(Touch::Move(700.0, 200.0), &f, 120);
-        app.touch(Touch::Up, &f, 140);
+        // The slide comes first, as on a phone's own lock screen: it brings
+        // up the keypad rather than opening the page, with a tap of the
+        // motor as it is made.
+        app.touch(Touch::Down(700.0, 2200.0), &f, 100);
+        app.touch(Touch::Move(700.0, 1500.0), &f, 120);
+        assert_eq!(app.touch(Touch::Up, &f, 140), vec![Effect::Haptic], "the slide made is felt");
         assert!(app.locked(), "the slide alone opens nothing");
+        assert!(app.lock_asking, "and what it brought up is the keypad");
+        // A pull above the keypad does nothing now: what opens the panel is
+        // the code, not the slide made a second time.
+        app.touch(Touch::Down(700.0, 1200.0), &f, 160);
+        app.touch(Touch::Move(700.0, 500.0), &f, 180);
+        app.touch(Touch::Up, &f, 200);
+        assert!(app.locked() && app.lock_asking, "a pull under the keypad leaves it up");
         let keys = lock_keys(&app);
         let key = |cap: Cap| keys.iter().find(|(_, c)| *c == cap).expect("on the keypad").0.centre();
-        let mut at = 200;
+        let mut at = 300;
+        // Each digit is a tap of the motor as well.
         for digit in ['5', '1', '3', '9'] {
             let (x, y) = key(Cap::Char(digit));
             app.touch(Touch::Down(x, y), &f, at);
-            app.touch(Touch::Up, &f, at + 60);
+            assert_eq!(app.touch(Touch::Up, &f, at + 60), vec![Effect::Haptic], "a key answers the finger");
             at += 120;
         }
         let (x, y) = key(Cap::Enter);
         app.touch(Touch::Down(x, y), &f, at);
         assert_eq!(
             app.touch(Touch::Up, &f, at + 60),
-            vec![Effect::CheckCode { recorded: app.state.lock_code.clone(), typed: "5139".into() }],
+            vec![
+                Effect::Haptic,
+                Effect::CheckCode { recorded: app.state.lock_code.clone(), typed: "5139".into() }
+            ],
             "the digits go to be checked"
         );
         // Wrong: what was typed is cleared and the panel says so for a while.
         app.code_checked(false, at + 200);
-        assert!(app.locked(), "a wrong code opens nothing");
+        assert!(app.locked() && app.lock_asking, "a wrong code opens nothing");
         let wrong_at = at + 200 + LOCK_WRONG_MS;
         assert_eq!(app.deadline(at + 300), Some(wrong_at), "the message has its time");
         // Right: the page under it is the page again.
         app.code_checked(true, wrong_at + 100);
         assert!(!app.locked(), "the right code opened it");
+    }
+
+    #[test]
+    fn back_puts_the_keypad_away_for_the_slide_again() {
+        let f = fonts();
+        let mut app = App::new(Screen::Home, W, H, PPD);
+        app.state.lock_code = "s1$4$00112233445566778899aabbccddeeff$".to_string() + &"ab".repeat(32);
+        app.lock_now(0);
+        app.touch(Touch::Down(700.0, 2200.0), &f, 100);
+        app.touch(Touch::Move(700.0, 1500.0), &f, 120);
+        app.touch(Touch::Up, &f, 140);
+        assert!(app.lock_asking);
+        app.lock_key(Cap::Char('5'));
+        app.lock_key(Cap::Char('1'));
+        assert!(app.key(Key::Back, 200).is_empty(), "back goes nowhere but the slide");
+        assert!(!app.lock_asking, "the keypad is put away");
+        assert!(app.locked(), "the panel is still shut");
+        // The slide is the way back to it.
+        app.touch(Touch::Down(700.0, 2200.0), &f, 300);
+        app.touch(Touch::Move(700.0, 1500.0), &f, 320);
+        app.touch(Touch::Up, &f, 340);
+        assert!(app.lock_asking, "and the slide brings it back");
+    }
+
+    #[test]
+    fn the_lock_screens_words_take_the_colour_the_settings_hold_them_to() {
+        let (f, i) = (fonts(), info());
+        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut c = Canvas::new(W, H);
+        app.lock_now(0);
+        app.compose(&mut c, &f, &i, "12:00", 0);
+        assert!(!app.lock_dark, "the home page is a light one, and takes the dark words");
+        app.state.lock_ink = LOCK_INK_DARK;
+        app.lock_now(0);
+        app.compose(&mut c, &f, &i, "12:00", 0);
+        assert!(app.lock_dark, "a dark system's words are the light ones, whatever the page");
+        app.state.lock_ink = LOCK_INK_LIGHT;
+        app.lock_now(0);
+        app.compose(&mut c, &f, &i, "12:00", 0);
+        assert!(!app.lock_dark, "and a light system's the dark ones");
+    }
+
+    #[test]
+    fn the_lock_screen_shows_the_battery_beside_the_level() {
+        let f = fonts();
+        let i = DeviceInfo { battery: Some(battery_at(52, Charge::Discharging)), ..info() };
+        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut c = Canvas::new(W, H);
+        app.lock_now(0);
+        app.compose(&mut c, &f, &i, "12:00", 0);
+        // The battery stands left of the figures, on one line centred on the
+        // panel: a point inside its fill is the ink the level is written in,
+        // which over this light page is the dark one.
+        let m = Theme::dark(W, H, PPD).m;
+        let (bw, nw) = (m.dp(LOCK_BATTERY_W_DP), m.dp(LOCK_BATTERY_NUB_DP.0));
+        let tw = c.text_width(&f.label, "52%", m.dp(14.0));
+        let left = W as f32 / 2.0 - (bw + nw + m.dp(LOCK_BATTERY_GAP_DP) + tw) / 2.0;
+        // A point inside the fill of a battery a little over half full.
+        let (x, y) = (left + bw * 0.3, H as f32 * 0.26 + m.dp(112.0));
+        let ink = app.lock_ink();
+        assert_eq!(rgb(&c, x, y), (ink.r, ink.g, ink.b), "the fill is the ink the figures take");
+        // With the switch off the battery is gone, and the figures stand
+        // alone where they always did.
+        app.state.lock_battery = false;
+        app.lock_now(0);
+        app.compose(&mut c, &f, &i, "12:00", 0);
+        assert_ne!(rgb(&c, x, y), (ink.r, ink.g, ink.b), "no battery is drawn once it is turned off");
+    }
+
+    #[test]
+    fn the_lock_screens_battery_reads_the_charger_and_the_level() {
+        let f = fonts();
+        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut c = Canvas::new(W, H);
+        app.lock_now(0);
+        let m = Theme::dark(W, H, PPD).m;
+        let (bw, nw) = (m.dp(LOCK_BATTERY_W_DP), m.dp(LOCK_BATTERY_NUB_DP.0));
+        let cy = H as f32 * 0.26 + m.dp(112.0);
+        // The body of the battery as it is drawn, and how much of the bolt's
+        // own yellow is found painted inside it.
+        let mut body = |level: u8, charge: Charge| {
+            let i = DeviceInfo { battery: Some(battery_at(level, charge)), ..info() };
+            app.state.lock_battery = true;
+            app.lock_now(0);
+            app.compose(&mut c, &f, &i, "12:00", 0);
+            let tw = c.text_width(&f.label, &format!("{level}%"), m.dp(14.0));
+            let left = W as f32 / 2.0 - (bw + nw + m.dp(LOCK_BATTERY_GAP_DP) + tw) / 2.0;
+            let half = m.dp(LOCK_BATTERY_H_DP) / 2.0;
+            let mut yellow = 0;
+            let mut x = left;
+            while x < left + bw {
+                let mut y = cy - half;
+                while y < cy + half {
+                    let (r, g, b) = rgb(&c, x, y);
+                    if r > 200 && g > 150 && b < 110 {
+                        yellow += 1;
+                    }
+                    y += 1.0;
+                }
+                x += 1.0;
+            }
+            (left, yellow)
+        };
+        let (_, yellow) = body(60, Charge::Charging);
+        assert!(yellow > 30, "on the charger a yellow bolt stands in the battery: {yellow}");
+        let (left, yellow) = body(60, Charge::Discharging);
+        assert_eq!(yellow, 0, "off it there is no bolt at all: {yellow}");
+        // A level clear of the mark, with no charger on, fills with the
+        // words' ink rather than a colour of its own.
+        let ink = app.lock_ink();
+        assert_eq!(rgb(&c, left + bw * 0.3, cy), (ink.r, ink.g, ink.b), "at rest the fill is the words' ink");
+        // A level below the bar's own mark, with no charger on, fills red;
+        // the mark itself does not; and with the cable in it is never a
+        // warning but the green of a charger.
+        assert_eq!(app.lock_battery_ink(LOCK_BATTERY_LOW_LEVEL, false), ink, "the mark itself is not below it");
+        assert_eq!(app.lock_battery_ink(LOCK_BATTERY_LOW_LEVEL - 1, false), LOCK_BATTERY_LOW, "one under it warns in red");
+        assert_eq!(app.lock_battery_ink(3, true), LOCK_BATTERY_GREEN, "and charging is never a warning");
+        // The same rule stands wherever the reading is drawn: at rest it
+        // keeps the ink of its own place, which on the always-on clock is
+        // the blue that clock keeps.
+        assert_eq!(App::battery_ink(57, false, AOD_BLUE), AOD_BLUE, "at rest, the ink of where it stands");
+        assert_eq!(App::battery_ink(3, true, AOD_BLUE), LOCK_BATTERY_GREEN, "and a charger overrides it");
+        assert_eq!(App::battery_ink(3, false, AOD_BLUE), LOCK_BATTERY_LOW, "as does a level worth a word");
+    }
+
+    #[test]
+    fn the_always_on_clock_shows_the_battery_the_lock_screen_shows() {
+        let f = fonts();
+        let i = DeviceInfo { battery: Some(battery_at(57, Charge::Discharging)), ..info() };
+        let mut app = App::new(Screen::Home, W, H, PPD);
+        app.state.aod = true;
+        app.state.screen_off = 1;
+        app.tick(0);
+        // A minute in the panel goes off and the curtain comes down; a
+        // second past that, the clock stands alone on black.
+        app.tick(90_000);
+        let now = 91_000;
+        app.tick(now);
+        let mut c = Canvas::new(W, H);
+        app.compose(&mut c, &f, &i, "08:14", now);
+        // The clock steps about each minute, and the battery steps with it:
+        // a point inside the fill of a battery a little over half full.
+        let m = Theme::dark(W, H, PPD).m;
+        let (dx, dy) = AOD_SPOTS[((now / 60_000) % AOD_SPOTS.len() as u64) as usize];
+        let cx = W as f32 / 2.0 + m.dp(dx);
+        let cy = H as f32 * 0.46 + m.dp(dy) + m.dp(126.0);
+        let (bw, nw) = (m.dp(LOCK_BATTERY_W_DP), m.dp(LOCK_BATTERY_NUB_DP.0));
+        let tw = c.text_width(&f.label, "57%", m.dp(14.0));
+        let left = cx - (bw + nw + m.dp(LOCK_BATTERY_GAP_DP) + tw) / 2.0;
+        let (x, y) = (left + bw * 0.3, cy);
+        let (r, g, b) = rgb(&c, x, y);
+        assert!(b > 200 && r < 130, "the clock's blue fills the battery: {r} {g} {b}");
+        // Turned off, the battery goes and its level stands alone, as on the
+        // lock screen: one switch for the two places the reading is drawn.
+        app.state.lock_battery = false;
+        app.compose(&mut c, &f, &i, "08:14", now);
+        assert_eq!(rgb(&c, x, y), (0, 0, 0), "no battery is drawn once it is turned off");
+    }
+
+    /// The three channels of the pixel at (`x`, `y`).
+    fn rgb(c: &Canvas, x: f32, y: f32) -> (u8, u8, u8) {
+        let at = ((y as u32 * c.w + x as u32) * 4) as usize;
+        (c.data[at], c.data[at + 1], c.data[at + 2])
+    }
+
+    #[test]
+    fn the_lock_screens_battery_is_a_switch_of_its_own() {
+        let (f, i) = (fonts(), info());
+        let mut app = App::new(Screen::Settings, W, H, PPD);
+        assert!(app.state.lock_battery, "the battery shows unless it is turned off");
+        tap(&mut app, &f, &i, Action::Toggle(Switch::LockBattery));
+        assert!(!app.state.lock_battery, "the row works the switch");
+        assert!(!Settings::of(&app.state).lock_battery, "and the settings keep it");
+    }
+
+    #[test]
+    fn the_lock_screens_words_are_chosen_on_a_page_of_their_own() {
+        let (f, i) = (fonts(), info());
+        let mut app = App::new(Screen::Settings, W, H, PPD);
+        tap(&mut app, &f, &i, Action::Open(Screen::LockInk));
+        assert_eq!(app.screen(), Screen::LockInk, "the row opens the page of ways");
+        tap(&mut app, &f, &i, Action::LockInk(LOCK_INK_LIGHT));
+        assert_eq!(app.state.lock_ink, LOCK_INK_LIGHT);
+        assert_eq!(app.screen(), Screen::LockInk, "the page stays while the words change");
+        // What the settings file keeps is the way, by name.
+        assert_eq!(Settings::of(&app.state).lock_ink, "light");
+        tap_back(&mut app, &f, &i, 500);
+        assert_eq!(app.screen(), Screen::Settings, "and back is the settings again");
+    }
+
+    #[test]
+    fn the_lock_screen_keeps_quiet_with_touch_vibration_off() {
+        let f = fonts();
+        let mut app = App::new(Screen::Home, W, H, PPD);
+        app.state.vibrate = false;
+        app.lock_now(0);
+        assert!(app.touch(Touch::Down(700.0, 2200.0), &f, 100).is_empty());
+        assert!(app.touch(Touch::Move(700.0, 1500.0), &f, 120).is_empty());
+        assert!(app.touch(Touch::Up, &f, 140).is_empty(), "with the setting off, no motor");
+        assert!(!app.locked(), "though the slide still opens it");
     }
 
     #[test]
