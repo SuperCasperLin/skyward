@@ -526,10 +526,11 @@ pub fn mount(cx: &Ctx) -> Frame {
 /// Who made the recovery, as the About page names them under its version.
 const AUTHOR: &str = "© 2026 Kirk Lin";
 
-/// Who ported it to this device, named under the author's line. GPL-3 keeps
-/// the original notice in place, so this one is added below it rather than
-/// over it.
-const PORT: &str = "nuwa port © 2026 Lin Zixi";
+/// Who ported it to this device, named under the author's line in the same
+/// form. GPL-3 keeps the original notice in place, so this one is added
+/// below it rather than over it; what the port changed is spelled out on
+/// the licence page.
+const PORT: &str = "© 2026 Lin Zixi";
 
 /// About this device, modelled on the stock「我的设备」: the wordmark, the
 /// version and its author over a moving colour field, and the summary,

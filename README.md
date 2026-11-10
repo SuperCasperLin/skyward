@@ -123,9 +123,10 @@ fastboot reboot recovery
 - nuwa 移植与本文档 © 2026 Lin Zixi，按 GPL-3.0 发布
 - MiSans 字体（小米）、KirkMono 字体，见 `upstream/resources/fonts/`
 
-About 页的署名也按同样的顺序排列：`© 2026 Kirk Lin` 在上，`nuwa port © 2026 Lin Zixi`
-在下。原作者的版权行在任何情况下都不删除——这是 GPL-3 的保留声明要求，也是本移植
-唯一无法「改」的地方。
+About 页的署名也按同样的顺序排列：`© 2026 Kirk Lin` 在上，`© 2026 Lin Zixi` 在下，
+两行形式一致——前者是原作者，后者是改动者，具体改了什么写在许可页的「修改说明」里。
+原作者的版权行在任何情况下都不删除——这是 GPL-3 的保留声明要求，也是本移植唯一无法
+「改」的地方。
 
 ---
 
@@ -142,4 +143,4 @@ always-on clock and caps-lock on the on-screen keyboard.
 
 Build with `bash build.sh`; the image lands in `upstream/target/out/<VERSION>/`. See
 [docs/BUILD.md](docs/BUILD.md) and [docs/FLASH.md](docs/FLASH.md) (Chinese).
-Licensed GPL-3.0, as upstream. Skyward © 2026 Kirk Lin; nuwa port © 2026 Lin Zixi.
+Licensed GPL-3.0, as upstream. Skyward © 2026 Kirk Lin; the nuwa port © 2026 Lin Zixi.
