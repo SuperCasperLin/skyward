@@ -2526,6 +2526,10 @@ const LOCK_PULL_DP: f32 = 220.0;
 /// How long the words that turn a code down stay under it.
 const LOCK_WRONG_MS: u64 = 4000;
 
+/// The shade under a key of the lock screen's keypad: the same one under
+/// all twelve, so the keys differ only in what they say.
+const LOCK_KEY_SHADE: u8 = 0x28;
+
 /// How many times over the page under the lock screen is shrunk before it
 /// is blurred and stretched back: what is left of it is colour, not words.
 const LOCK_BLUR_SHRINK: u32 = 6;
@@ -3526,38 +3530,43 @@ impl App {
     }
 
     /// A key of the lock screen's keypad: a digit typed, one erased, or the
-    /// code given to be checked. Each of them is a tap of the motor, as the
-    /// phone's own keypad answers a finger.
+    /// code given to be checked. Every key answers with a tap of the motor,
+    /// as the phone's own keypad does — even one that changes nothing, such
+    /// as a ninth digit or an erase with nothing typed.
     pub fn lock_key(&mut self, cap: Cap) -> Vec<Effect> {
+        let mut fx = self.buzz();
         match cap {
             Cap::Char(ch) => {
-                if self.lock_typed.chars().count() >= CODE_MAX {
-                    return Vec::new();
+                if self.lock_typed.chars().count() < CODE_MAX {
+                    self.lock_typed.push(ch);
+                    self.lock_wrong = None;
+                    self.dirty = true;
                 }
-                self.lock_typed.push(ch);
-                self.lock_wrong = None;
             }
             Cap::Backspace => {
-                if self.lock_typed.pop().is_none() {
-                    return Vec::new();
+                if self.lock_typed.pop().is_some() {
+                    self.lock_wrong = None;
+                } else {
+                    // Nothing to erase: the key is a way back to the slide,
+                    // as the hardware back key is on this page.
+                    self.lock_asking = false;
+                    self.lock_wrong = None;
+                    self.lock_pressed = None;
                 }
-                self.lock_wrong = None;
+                self.dirty = true;
             }
             Cap::Enter => {
                 let typed = std::mem::take(&mut self.lock_typed);
                 self.dirty = true;
-                if typed.chars().count() < CODE_MIN {
+                if typed.chars().count() >= CODE_MIN {
+                    fx.push(Effect::CheckCode { recorded: self.state.lock_code.clone(), typed });
+                } else {
                     self.lock_typed = typed;
-                    return self.buzz();
                 }
-                let mut fx = self.buzz();
-                fx.push(Effect::CheckCode { recorded: self.state.lock_code.clone(), typed });
-                return fx;
             }
-            _ => return Vec::new(),
+            _ => {}
         }
-        self.dirty = true;
-        self.buzz()
+        fx
     }
 
     /// The runtime checked what was typed against the code kept: the panel
@@ -5027,24 +5036,38 @@ impl App {
         } else {
             glass.pal.card = Rgba::rgb(0xFF, 0xFF, 0xFF).with_alpha(0x86);
             glass.pal.text = LOCK_MARK;
-            for (r, cap) in widgets::keypad_rects(t, top) {
-                if matches!(cap, Cap::Char(_)) {
-                    out.shadow_round_rect(r.x, r.y, r.w, r.h, r.w / 2.0, m.dp(7.0), Rgba::rgb(0, 0, 0).with_alpha(0x28));
-                }
+            // Every key gets the same shade: the twelve are one set of keys,
+            // whatever colour the one on the right is given.
+            for (r, _) in widgets::keypad_rects(t, top) {
+                out.shadow_round_rect(r.x, r.y, r.w, r.h, r.w / 2.0, m.dp(7.0), Rgba::rgb(0, 0, 0).with_alpha(LOCK_KEY_SHADE));
             }
         }
-        widgets::keypad(out, &glass, f, l, top, self.lock_pressed, l.pick(["解锁", "解鎖", "Unlock"]));
-        let dots_cy = top - m.dp(52.0);
-        // The dots keep the blue of the page that asks for a decryption, not
-        // the ink of the glass: a code is the same code wherever it is typed,
-        // and what has been typed should read the same in both places.
+        // The dots and the keys that carry words keep the blue of the page
+        // that asks for a decryption, not the ink of the glass: a code is
+        // the same code wherever it is typed.
         glass.pal.accent = self.theme().pal.accent;
+        // With nothing typed that key is a way back to the slide; once a
+        // digit is down it erases, as the phone's own keypad does.
+        let back = if self.lock_typed.is_empty() {
+            l.pick(["返回", "返回", "Back"])
+        } else {
+            l.pick(["删除", "刪除", "Delete"])
+        };
+        // The very same key as the digit beside it, with only its face
+        // coloured: nothing else about its shape or shade changes.
+        let enter_face = Some((glass.pal.accent, Rgba::rgb(255, 255, 255)));
+        widgets::keypad(out, &glass, f, top, self.lock_pressed, l.pick(["解锁", "解鎖", "Unlock"]), back, enter_face);
+        let dots_cy = top - m.dp(52.0);
         widgets::code_dots(out, &glass, cx, dots_cy, self.lock_typed.chars().count());
+        // One line over the dots: what this keypad is for, or the words a
+        // wrong code is met with. They take turns, so neither overlaps.
         let wrong = self.lock_wrong.is_some_and(|at| now < at + LOCK_WRONG_MS);
-        if wrong {
-            let text = l.pick(["密码错误，请重试", "密碼錯誤，請重試", "Wrong code, try again"]);
-            out.text_center(&f.body, text, cx, dots_cy - m.dp(40.0), m.dp(15.0), Rgba::rgb(0xE0, 0x5A, 0x4E));
-        }
+        let (text, ink) = if wrong {
+            (l.pick(["密码错误，请重试", "密碼錯誤，請重試", "Wrong code, try again"]), Rgba::rgb(0xE0, 0x5A, 0x4E))
+        } else {
+            (l.pick(["输入密码进入 Recovery", "輸入密碼進入 Recovery", "Enter the code to open Recovery"]), self.lock_dim())
+        };
+        out.text_center(&f.body, text, cx, dots_cy - m.dp(46.0), m.dp(15.0), ink);
     }
 
     /// The charging screen, `level` of the way over the page drawn on `out`.
@@ -7018,9 +7041,9 @@ impl App {
                     let travel = if from_left { x - start } else { start - x };
                     let ready = travel > m.dp(BACK_SWIPE_DP);
                     // A tap of the motor as the `<` appears, as the system
-                    // gives, but not on the first page, where the cue arms
-                    // and yet nothing can come of it.
-                    if ready && !armed && self.state.vibrate && self.stack.len() > 1 {
+                    // gives — on the first page too, where the cue arms but
+                    // opens nothing. The hand still expects to feel it.
+                    if ready && !armed && self.state.vibrate {
                         fx.push(Effect::Haptic);
                     }
                     self.drag = Drag::Edge { start, from_left, armed: ready, x, cy };
@@ -8893,7 +8916,7 @@ mod tests {
         app.touch(Touch::Down(10.0, 1600.0), &f, 0);
         app.touch(Touch::Move(80.0, 1600.0), &f, 8);
         assert!(matches!(app.drag, Drag::Edge { from_left: true, .. }), "the first page takes the swipe too");
-        assert!(app.touch(Touch::Move(400.0, 1600.0), &f, 16).is_empty(), "no tap of the motor where nothing waits");
+        assert_eq!(app.touch(Touch::Move(400.0, 1600.0), &f, 16), vec![Effect::Haptic], "and the motor still taps as the cue arms");
         assert_eq!(app.top().1, before, "the page under the finger has not scrolled");
         assert!(matches!(app.drag, Drag::Edge { armed: true, .. }), "the cue still arms, though it opens nothing");
         app.touch(Touch::Up, &f, 24);
@@ -10725,6 +10748,23 @@ mod tests {
     }
 
     #[test]
+    fn the_decrypt_pages_erasing_key_is_a_way_back_until_something_is_typed() {
+        let (f, i) = (fonts(), info());
+        let mut app = App::new(Screen::Decrypt, W, H, PPD);
+        app.data_waiting(Some((0, Keys::Digits)));
+        let t = app.theme();
+        let top = H as f32 - widgets::keypad_height(&t);
+        let back = widgets::keypad_rects(&t, top).into_iter().find(|(_, cap)| *cap == Cap::Backspace).map(|(r, _)| r).expect("the last row has an erasing key");
+        let frame = app.frame(&f, &i);
+        let hit = frame.hits.iter().find(|h| h.rect == back).expect("and it answers a touch");
+        assert!(matches!(hit.action, Action::Back), "with nothing typed it is a way back");
+        tap(&mut app, &f, &i, Action::Type(Cap::Char('1')));
+        let frame = app.frame(&f, &i);
+        let hit = frame.hits.iter().find(|h| h.rect == back).expect("and still answers a touch");
+        assert!(matches!(hit.action, Action::Type(Cap::Backspace)), "once a digit is down it erases");
+    }
+
+    #[test]
     fn nothing_typed_is_not_sent() {
         let (f, i) = (fonts(), info());
         let mut app = App::new(Screen::Decrypt, W, H, PPD);
@@ -12432,6 +12472,66 @@ mod tests {
         app.touch(Touch::Move(700.0, 1500.0), &f, 320);
         app.touch(Touch::Up, &f, 340);
         assert!(app.lock_asking, "and the slide brings it back");
+    }
+
+    #[test]
+    fn every_key_of_the_lock_keypad_taps_and_an_empty_erase_goes_back() {
+        let mut app = App::new(Screen::Home, W, H, PPD);
+        app.state.lock_code = "s1$4$00112233445566778899aabbccddeeff$".to_string() + &"ab".repeat(32);
+        app.lock_now(0);
+        app.lock_asking = true;
+        // Too short to check, but the finger still felt the key.
+        assert_eq!(app.lock_key(Cap::Enter), vec![Effect::Haptic], "a short code is refused but felt");
+        assert!(app.lock_typed.is_empty(), "and nothing was given to be checked");
+        // With nothing typed the erase key is the way back to the slide.
+        assert_eq!(app.lock_key(Cap::Backspace), vec![Effect::Haptic]);
+        assert!(!app.lock_asking, "nothing to erase, so the keypad is put away");
+        assert!(app.locked(), "and the panel stays shut");
+        // The ninth digit changes nothing, but is still felt.
+        app.lock_asking = true;
+        for ch in "12345678".chars() {
+            assert_eq!(app.lock_key(Cap::Char(ch)), vec![Effect::Haptic]);
+        }
+        assert_eq!(app.lock_key(Cap::Char('9')), vec![Effect::Haptic], "a ninth digit is felt");
+        assert_eq!(app.lock_typed, "12345678", "and changes nothing");
+        assert_eq!(app.lock_key(Cap::Backspace), vec![Effect::Haptic], "an erase is felt too");
+        assert_eq!(app.lock_typed, "1234567");
+        let fx = app.lock_key(Cap::Enter);
+        assert_eq!(fx[0], Effect::Haptic, "and so is the key that gives the code over");
+        assert!(matches!(fx.get(1), Some(Effect::CheckCode { .. })));
+    }
+
+    #[test]
+    fn every_key_of_the_lock_keypad_stands_off_the_light_glass() {
+        let (f, i) = (fonts(), info());
+        let mut app = App::new(Screen::Home, W, H, PPD);
+        app.lock_now(0);
+        // A plain white pane under the keypad: whatever darkens the space
+        // just under a key is its own shade, not something on the page.
+        let mut white = Canvas::new(W, H);
+        white.clear(Rgba::rgb(0xFF, 0xFF, 0xFF));
+        app.lock_backdrop = Some(white);
+        app.lock_dark = false;
+        app.lock_asking = true;
+        let mut c = Canvas::new(W, H);
+        c.clear(Rgba::rgb(0xFF, 0xFF, 0xFF));
+        app.compose(&mut c, &f, &i, "12:00", 0);
+        let t = Theme::dark(W, H, PPD);
+        let top = H as f32 - widgets::keypad_height(&t);
+        let keys = widgets::keypad_rects(&t, top);
+        assert_eq!(keys.len(), 12, "four rows of three");
+        let mut depths = Vec::new();
+        for (r, cap) in keys {
+            let (x, y) = (r.x + r.w / 2.0, r.y + r.h + t.m.dp(5.0));
+            let under = rgb(&c, x, y);
+            let clear = rgb(&c, 8.0, y);
+            let (under, clear) = (under.0 as i32 + under.1 as i32 + under.2 as i32, clear.0 as i32 + clear.1 as i32 + clear.2 as i32);
+            assert!(under < clear - 10, "the key {cap:?} casts the same shade as the digits: {under} against {clear}");
+            depths.push(clear - under);
+        }
+        // With the confirm key drawn exactly as the digit keys are, the
+        // three keys of the last row cast one and the same shade.
+        assert!((depths[9] - depths[10]).abs() <= 1 && (depths[10] - depths[11]).abs() <= 1, "the last row is one set of keys: {depths:?}");
     }
 
     #[test]

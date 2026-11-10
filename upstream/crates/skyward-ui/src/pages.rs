@@ -18,7 +18,7 @@ use crate::term::{self, Term};
 use crate::theme::Theme;
 use crate::tr;
 use crate::icons::{self, Icon};
-use crate::widgets::{self, Caption, Detail, Fact, Outline, Row, Spec, SystemCard, SystemMark, Tone, Trail};
+use crate::widgets::{self, Cap, Caption, Detail, Fact, Outline, Row, Spec, SystemCard, SystemMark, Tone, Trail};
 use skyward_info::{DeviceInfo, VERSION};
 use skyward_install::{Outcome, Reflash, Refusal, Stage};
 use skyward_net::download::Progress;
@@ -830,9 +830,15 @@ fn code(cx: &Ctx, mut c: Canvas, user: u32, keys: Keys, checking: bool) -> Frame
         }
         Keys::Digits => {
             let top = m.h as f32 - widgets::keypad_height(t);
-            let caps = widgets::keypad(&mut c, t, f, l, top, s.key_held(), l.pick(["解密", "解密", "Decrypt"]));
+            let back = if s.code.is_empty() { l.pick(["返回", "返回", "Back"]) } else { l.pick(["删除", "刪除", "Delete"]) };
+            let caps = widgets::keypad(&mut c, t, f, top, s.key_held(), l.pick(["解密", "解密", "Decrypt"]), back, Some((t.pal.accent, Rgba::rgb(255, 255, 255))));
             if !checking {
-                out.extend(caps.into_iter().map(|(rect, cap)| Hit { rect, action: Action::Type(cap) }));
+                // With nothing typed the erasing key is a way back out of
+                // the page, as the hardware back key is.
+                out.extend(caps.into_iter().map(|(rect, cap)| {
+                    let action = if cap == Cap::Backspace && s.code.is_empty() { Action::Back } else { Action::Type(cap) };
+                    Hit { rect, action }
+                }));
             }
             top
         }
@@ -923,7 +929,7 @@ pub fn set_code(cx: &Ctx) -> Frame {
     }
     widgets::code_dots(&mut c, t, x, bottom - m.dp(56.0), typed);
     let enter = l.pick(if again { ["保存", "儲存", "Save"] } else { ["下一步", "下一步", "Next"] });
-    let caps = widgets::keypad(&mut c, t, f, l, bottom, s.key_held(), enter);
+    let caps = widgets::keypad(&mut c, t, f, bottom, s.key_held(), enter, l.pick(["删除", "刪除", "Delete"]), Some((t.pal.accent, Rgba::rgb(255, 255, 255))));
     out.extend(caps.into_iter().map(|(rect, cap)| Hit { rect, action: Action::Type(cap) }));
     // The page's own title stands in the bar alone, as the decrypt page's
     // does: this page puts its own words where it wants them.

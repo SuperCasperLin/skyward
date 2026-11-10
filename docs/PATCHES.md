@@ -112,7 +112,7 @@ AOD 的那一行跟着每分钟的位移走，`state.lock_battery` 关了它俩�
 | `skyward/src/pin.rs` | 新增：`Worker`，把拉伸放到后台线程，`pipe2(O_CLOEXEC\|O_NONBLOCK)` 唤醒主循环，`Done::{Saved,Checked}` 回传（与 `Decryptor` 同一个范式） |
 | `skyward-ui/src/app.rs` | `State.lock`/`lock_code`/`code_entry`；`Switch::Lock`、`Action::ForgetCode`、`Screen::SetCode`、`Effect::SaveCode`/`CheckCode`；`State.lock_ink`、`Screen::LockInk`、`Action::LockInk`；`App.locked`/`pulled`/`lock_from`/`lock_pressed`/`lock_typed`/`lock_wrong`/`lock_asking`/`lock_backdrop`；`LOCK_SLID`(0.6)、`LOCK_PULL_DP`(220)、`LOCK_WRONG_MS`(4000)、`LOCK_BLUR_SHRINK`(6)、`LOCK_BLUR_RADIUS`(3)、`LOCK_COLOUR`(1.55)、`LOCK_INK_WAYS`(3)/`LOCK_INK_FOLLOW`/`LOCK_INK_LIGHT`/`LOCK_INK_DARK`、`LOCK_LIGHT`(128)、`LOCK_MARK`/`LOCK_MARK_DIM`（亮玻璃上的深墨）、`LOCK_BATTERY_W_DP`(26)/`LOCK_BATTERY_H_DP`(12.5)/`LOCK_BATTERY_NUB_DP`/`LOCK_BATTERY_PAD_DP`/`LOCK_BATTERY_STROKE_DP`/`LOCK_BATTERY_GAP_DP`、`LOCK_BATTERY_GREEN`(`#1DCD3A`)/`LOCK_BATTERY_LOW`(`#E64B3B`)/`LOCK_BATTERY_LOW_LEVEL`(20，与状态栏同)、`LOCK_BOLT_YELLOW`(`#FFD60A`)、`LOCK_BOLT_W_DP`/`LOCK_BOLT_H_DP`/`LOCK_BOLT_TOP`/`LOCK_BOLT_FOOT`、`Switch::LockBattery`；`battery_ink()` 定颜色（平常 `AOD_BLUE`、插线绿、低电红，锁屏与 AOD 同一个函数）、`battery_body()` 画那块电池（含充电时的闪电）、`compose_battery()` 把它与百分比摆成一行——锁屏与 AOD 共用这一支笔；`sleep()`/`lock_now()` 走 `lock_put()` 上锁（按键模式下跳过）、`touch()` 与 `key()` 在锁屏处收口、`lock_touch()`/`ask_code()`/`lock_key()`/`buzz()`/`code_typed()`/`unlock_panel()`/`code_saved()`/`code_checked()`/`forget_code()`；`compose_lock()` 及其两套版式（背景为 `Canvas::blurred()` 加 `saturate()` 的结果，一点不压暗）；`deadline()` 加错误提示到期 |
 | `skyward-ui/src/canvas.rs` | 新增 `blurred(factor, radius)`：按 `factor` 缩块平均、在缩图上做两次方框模糊、再双线性拉回全屏；`saturate(amount)`：把每个像素推离它自己的灰（0 为单色，1 不变，大于 1 加深），补回模糊洗掉的色；`luma()`：整块画布的平均亮度（Rec.709 权重），决定锁屏用深字还是白字。锁屏每次上锁只算一次，结果留在 `App.lock_backdrop` |
-| `skyward-ui/src/widgets.rs` | `keypad()` 的确认键文字改为入参（原来的「解密」写死），并拆出只算不画的 `keypad_rects()` 供锁屏命中；新增 `code_dots()` |
+| `skyward-ui/src/widgets.rs` | `keypad()` 的确认键与删除键文字改为入参，确认键整张脸（`enter_face`）也可由调用方指定——传 `None` 时与数字键完全同款；十二颗键一律画圆底，并拆出只算不画的 `keypad_rects()` 供锁屏命中；新增 `code_dots()` |
 | `skyward-ui/src/pages.rs` | 新页 `set_code()`（两步输入）与 `lock_ink()`（三种字色，`Trail::Check` 单选）；设置页「亮度」段之下新增「锁屏」段（开关 + 锁屏电量 + 解锁密码 + 锁屏文字行） |
 | `skyward-ui/src/settings.rs` | `Settings.lock`/`lock_code`/`lock_ink`/`lock_battery` 的读写；`lock_ink` 以 `follow`/`light`/`dark` 三个名字存，读回来认不出的就保持原状 |
 
@@ -123,6 +123,32 @@ AOD 的那一行跟着每分钟的位移走，`state.lock_battery` 关了它俩�
   第一眼看到的都是滑动页；密码设置与否只决定滑完之后进页面还是进键盘。
 - **锁屏期间不重画页面**：模糊背景已有缓存时，`compose()` 跳过 `compose_page()`——拉动时
   每帧只画锁屏本身，页面重画一遍纯属浪费（这一条也是模糊背景能用的前提）。
+  **没有做成每帧实时模糊**，不是做不到，是拿真机数据算过账（见下）。
+
+### 为什么模糊背景是静态缓存
+
+`lock_backdrop` 在上锁时算一次（`blurred(6,3)` → `saturate(1.55)`），之后一直复用。
+改成实时只要去掉这个缓存、每帧重画页面再模糊一遍即可，但用
+`skyward-preview --bench-blur`（真机 1440×3200，20 帧取平均）量到：
+
+| 每帧的活 | 耗时 |
+|---|---|
+| 重画页面 `compose()` | 1.97 ms |
+| 模糊 + 饱和 | 46.00 ms |
+| 合计 | **47.97 ms** |
+
+60 fps 的预算是 16.7 ms/帧，实时模糊会把上滑手势压到约 20 fps。瓶颈不在小图上的
+方框模糊——把缩小比例从 1/6 一路降到 1/16，也只从 46.07 ms 降到 41.38 ms；
+真正贵的是把小图插值放大回 460 万像素、再逐像素 `saturate()` 写满 18 MB。
+要实时就得换算法（GPU / DRM plane 缩放），不是调参数能解决的。
+
+而收益几乎为零：锁屏时触摸被锁屏收口，底下的页面本来就是冻结的；唯一会变的是
+状态栏时钟和后台进度。让时钟从 08:14 跳到 08:15，两张模糊背景的像素差
+**平均 0.0019/255、最大 3/255**——1/6 缩小加两轮方框模糊把这点细节全洗掉了，
+肉眼根本看不出「动」。所以每帧多花 46 ms 换一个看不见的变化，不划算。
+
+真想让锁屏显得「活」，成本最低的是**上滑视差**：手指拉动时把已缓存的磨砂背景
+轻微缩放/上移几个百分点，只是 `lay()` 时换个位置，不重算模糊，视觉上却明显。
 - **不压暗，让字色跟着玻璃走**：整层压暗会把浅色页面压成一片均匀的中灰（第一版就是这样，
   太闷），只压上下两端又会在中间留一道生硬的分界。索性一点不压：上锁时用 `luma()` 读一次
   玻璃的平均亮度，亮玻璃用深墨字、暗玻璃用白字。浅色页面上的锁屏因此是黑字，深色页面上
@@ -136,6 +162,44 @@ AOD 的那一行跟着每分钟的位移走，`state.lock_battery` 关了它俩�
   键盘、轨道、时钟仍按玻璃明暗取色，只有「已输几位」这一处和解密页对齐。
 - **电量画图不画字**：状态栏那块电池把数字塞在壳子里，锁屏上已经有一个大号蓝字百分比，
   再塞一次就重了。所以锁屏的电池只留形状与填充，数字交给旁边那行字，两者同一份蓝色。
+- **密码页有话说了**：圆点上方一行「输入密码进入 Recovery」（简/繁/英各一份），
+  用 `lock_dim()` 跟着玻璃明暗取色；`lock_wrong` 未到期的四秒里，这一行换成红色的
+  「密码错误，请重试」，两者共用位置，不会叠字。
+- **十二颗键都是圆键**：`widgets::keypad()` 原来把 `Cap::Backspace` 当 `bare`，不画圆底，
+  只把「删除」两个字放在页面上——锁屏键盘是从解密页抄来的，这个不对称也一起抄了过来。
+  现在所有键一律 `fill_circle()`。锁屏另有只属于它的一层投影：`compose_lock_code()`
+  的浅玻璃分支原来只给 `Cap::Char(_)` 画 `shadow_round_rect`，于是新加圆底的返回键
+  和最右边蓝色解锁键都平贴在玻璃上。改成遍历 `keypad_rects()` 全部十二颗；深玻璃上
+  仍与数字键一样不画投影（深色键黑底上看不出黑影）。
+  **样式统一靠参数化，不靠给蓝键开小灶**：`keypad()` 多收
+  `enter_face: Option<(Rgba, Rgba)>`（键面色、字色）。传 `None` 时解锁键与数字键
+  完全同款，连圆底都是 `t.pal.card`；锁屏传 `Some((glass.pal.accent, white))`，
+  解密页与设密码页传 `Some((t.pal.accent, white))`。所以「蓝色」只是这一个参数，
+  形状、圆底、投影、命中矩形全部走同一段代码。
+
+  **做过四步对照，把阴影与颜色隔离**（用 `out/shadow/probe.py` 量圆外下方的像素）：
+
+  | 步骤 | 解锁键 | 三颗键阴影像素 | 肉眼 |
+  | --- | --- | --- | --- |
+  | A | 完全 copy 数字 0 的白键 | 229 → 211，三颗相同 | 一致 |
+  | B | 只把键面换成实心蓝 | 229 → 211，三颗仍相同 | 蓝键显得平 |
+  | C | 蓝键连透明度也 copy（`card.a`） | 229 → 211，三颗仍相同 | 蓝变浅、白字变弱 |
+  | D | 十二颗阴影统一加深一档 `0x38` | 229 → 204，三颗仍相同 | 白键依旧更显眼（未采用） |
+
+  结论：差异从来不在阴影参数，而是饱和蓝与灰影的高对比把淡影"吃"掉了；白键几乎
+  与玻璃同色，那圈灰是它唯一浮起来的线索。**最终取 B**：`LOCK_KEY_SHADE = 0x28`
+  对十二颗一视同仁，不给单键加深（数值真的不一致），也不整体加深（白蓝同步变深，
+  白键看上去依旧更深）。用户要的是「直接 copy 的一个按钮」，B 就是。
+  函数签名另去掉 `l: Lang`、多收一个 `back: &str`，由调用方决定这一颗写什么：
+  - 锁屏：`lock_typed` 为空写「返回」，非空写「删除」；空输入按下去走
+    `lock_key(Cap::Backspace)` 的新分支，收起键盘回上滑页（与硬件返回键一致）。
+  - 解密页：同样按 `s.code` 切换；空输入时把这颗键的 `Hit` 从
+    `Action::Type(Cap::Backspace)` 换成 `Action::Back`，有输入才退回普通删除。
+  - 设密码页：固定写「删除」，只继承圆底，不动两步输入的流程。
+- **键盘上每一下都震**：`lock_key()` 原先在「已到 8 位还按数字」「没数字按删除」两处
+  直接 `return Vec::new()`，位数不足按解锁也只是单独震一下。改成入口先 `buzz()`，
+  各分支只改状态、不再各自发震动，`Enter` 需要校验时把 `Effect::CheckCode` 追加到同一份
+  `fx`。于是按了却什么都没改变的键也有反馈，`state.vibrate` 关掉仍然全静音。
 - **震动走 `Effect::Haptic`**，与页面里的长按、截图同一个出口，`state.vibrate` 关掉就静音。
 - **按键也走锁屏**：除电源键外，锁屏期间任何按键都不透传到页面（否则 `返回` 会翻页）。
 - **充电屏画在锁屏之上**：插线先看到充电动画，划走才落到锁屏。
@@ -150,7 +214,8 @@ AOD 的那一行跟着每分钟的位移走，`state.lock_battery` 关了它俩�
 
 配套两处让它「认得到但不假装能返回」：
 
-- 拉过 `BACK_SWIPE_DP` 时只有 `stack.len() > 1` 才发 `Effect::Haptic`，首页不给假的震动。
+- 拉过 `BACK_SWIPE_DP` 照常发 `Effect::Haptic`——手已经做了这个动作，首页也该有
+  那一记马达反馈；唯一区别是手指抬起后没有页面切换。
 - `Touch::Up` 时只有真的有上一页才调 `back()`；首页（以及短划）走同一段回弹，
   箭头用 `Spring` 缩回边缘，而不是凭空消失。`back()` 本来就在 `stack.len() <= 1` 时
   直接返回空，所以没有第二道保险要加。

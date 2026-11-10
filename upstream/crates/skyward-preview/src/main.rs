@@ -138,7 +138,7 @@ fn main() -> Result<()> {
     // has gone off: a look at it without a phone, from the device's own
     // config and font where they are named.
     let looking = args.get(2).map(String::as_str);
-    if matches!(looking, Some("--aod" | "--lock")) {
+    if matches!(looking, Some("--aod" | "--lock" | "--bench-blur")) {
         let near = |flag: &str| args.iter().position(|a| a == flag).and_then(|k| args.get(k + 1)).cloned();
         let config = near("--config")
             .map(PathBuf::from)
@@ -152,6 +152,61 @@ fn main() -> Result<()> {
         let fonts = Fonts::load(&font, 0, mono)?;
         eprintln!("font: {}", font.display());
         let (w, h) = (cfg.display.width, cfg.display.height);
+        if looking == Some("--bench-blur") {
+            // What a lock screen that re-blurred the page every frame would
+            // cost: the page is drawn again, then shrunk, blurred twice and
+            // stretched back over 1440x3200. Measured on the device itself.
+            use std::time::Instant;
+            let mut app = App::new(Screen::Home, w, h, cfg.display.density as f32 / 160.0);
+            let info = nezha(&cfg);
+            let mut page = Canvas::new(w, h);
+            app.compose(&mut page, &fonts, &info, CLOCK, 0);
+            let n = 20;
+            let redraw = Instant::now();
+            for _ in 0..n {
+                let mut c = Canvas::new(w, h);
+                app.compose(&mut c, &fonts, &info, CLOCK, 0);
+                std::hint::black_box(&c);
+            }
+            let page_ms = redraw.elapsed().as_secs_f64() * 1000.0 / n as f64;
+            let blurred = Instant::now();
+            for _ in 0..n {
+                let mut c = page.blurred(6, 3);
+                c.saturate(1.55);
+                std::hint::black_box(&c);
+            }
+            let blur_ms = blurred.elapsed().as_secs_f64() * 1000.0 / n as f64;
+            println!("page redraw {page_ms:.2} ms/frame; blur+saturate {blur_ms:.2} ms/frame; both {:.2} ms/frame", page_ms + blur_ms);
+            for factor in [6u32, 8, 12, 16] {
+                let at = Instant::now();
+                for _ in 0..n {
+                    let mut c = page.blurred(factor, 3);
+                    c.saturate(1.55);
+                    std::hint::black_box(&c);
+                }
+                println!("  shrink 1/{factor}: {:.2} ms/frame", at.elapsed().as_secs_f64() * 1000.0 / n as f64);
+            }
+            // How much of a minute tick survives the blur at all: draw the
+            // same page one minute apart and compare their two panes.
+            let mut before = Canvas::new(w, h);
+            let mut after = Canvas::new(w, h);
+            app.compose(&mut before, &fonts, &info, "08:14", 0);
+            app.compose(&mut after, &fonts, &info, "08:15", 0);
+            let mut pane_a = before.blurred(6, 3);
+            let mut pane_b = after.blurred(6, 3);
+            pane_a.saturate(1.55);
+            pane_b.saturate(1.55);
+            let (mut sum, mut max) = (0u64, 0u32);
+            for (a, b) in pane_a.data.as_chunks::<4>().0.iter().zip(pane_b.data.as_chunks::<4>().0.iter()) {
+                for k in 0..3 {
+                    let d = (a[k] as i32 - b[k] as i32).unsigned_abs();
+                    sum += d as u64;
+                    max = max.max(d);
+                }
+            }
+            println!("a minute tick moves a blurred pixel by {:.4}/255 on average, {max}/255 at most", sum as f64 / (w as f64 * h as f64 * 3.0));
+            return Ok(());
+        }
         if looking == Some("--lock") {
             // The battery the panel reads, in the three states it knows: 57%
             // off the charger is the clock's blue, the same on this light
@@ -159,17 +214,18 @@ fn main() -> Result<()> {
             // with; and 37% on the charger is the bar's green with a yellow
             // bolt in it.
             let locks = [
-                ("lock-slide.png", 91_000u64, false, false, false, LOCK_INK_FOLLOW, 57, Charge::Discharging),
-                ("lock-code.png", 91_000, true, false, false, LOCK_INK_FOLLOW, 57, Charge::Discharging),
-                ("lock-code-wrong.png", 94_000, true, true, false, LOCK_INK_FOLLOW, 57, Charge::Discharging),
+                ("lock-slide.png", 91_000u64, false, false, false, LOCK_INK_FOLLOW, 57, Charge::Discharging, 0),
+                ("lock-code.png", 91_000, true, false, false, LOCK_INK_FOLLOW, 57, Charge::Discharging, 4),
+                ("lock-code-empty.png", 91_000, true, false, false, LOCK_INK_FOLLOW, 57, Charge::Discharging, 0),
+                ("lock-code-wrong.png", 94_000, true, true, false, LOCK_INK_FOLLOW, 57, Charge::Discharging, 4),
                 // The dark mode's own pane, and the words it gives.
-                ("lock-dark.png", 91_000, false, false, true, LOCK_INK_DARK, 57, Charge::Discharging),
-                ("lock-charging.png", 91_000, false, false, false, LOCK_INK_FOLLOW, 37, Charge::Charging),
-                ("lock-low.png", 91_000, false, false, false, LOCK_INK_FOLLOW, 8, Charge::Discharging),
+                ("lock-dark.png", 91_000, false, false, true, LOCK_INK_DARK, 57, Charge::Discharging, 0),
+                ("lock-charging.png", 91_000, false, false, false, LOCK_INK_FOLLOW, 37, Charge::Charging, 0),
+                ("lock-low.png", 91_000, false, false, false, LOCK_INK_FOLLOW, 8, Charge::Discharging, 0),
             ];
-            for (name, now, coded, wrong, dark, ink, level, charge) in locks {
+            for (name, now, coded, wrong, dark, ink, level, charge, typed) in locks {
                 let path = out.join(name);
-                write_png(&path, &lock(&fonts, &cfg, w, h, "08:14", now, coded, wrong, dark, ink, level, charge))?;
+                write_png(&path, &lock(&fonts, &cfg, w, h, "08:14", now, coded, wrong, dark, ink, level, charge, typed))?;
                 println!("wrote {}", path.display());
             }
             return Ok(());
@@ -461,7 +517,7 @@ fn main() -> Result<()> {
     let adding = |app: &mut App, name: &str, security: Security, field: Field, choosing: bool| {
         app.state.adding = Some(Adding { name: name.into(), security, field, choosing });
     };
-    let pages: [PageShot; 178] = [
+    let pages: [PageShot; 179] = [
         ("11-install-light-locked", Screen::Install, false, &|app| {
             app.state.data = Data::Locked { user: 0, keys: Keys::Digits, checking: false };
         }),
@@ -1030,6 +1086,9 @@ fn main() -> Result<()> {
             app.data_waiting(Some((0, Keys::Digits)));
             app.state.code = "123".into();
         }),
+        // Nothing typed yet: the erasing key is a round way back, not words
+        // alone on the page.
+        ("86b-decrypt-light-digits-empty", Screen::Decrypt, false, &|app| app.data_waiting(Some((0, Keys::Digits)))),
         ("87-decrypt-dark-letters", Screen::Decrypt, true, &|app| app.data_waiting(Some((10, Keys::Letters)))),
         ("88-decrypt-light-checking", Screen::Decrypt, false, &|app| {
             app.state.data = Data::Locked { user: 0, keys: Keys::Digits, checking: true };
@@ -1619,7 +1678,7 @@ fn aod(f: &Fonts, cfg: &DeviceConfig, w: u32, h: u32, clock: &str, now: u64) -> 
 /// on: the slide that opens it, or the keypad the code is typed on, the
 /// last with a code just turned down.
 #[allow(clippy::too_many_arguments)]
-fn lock(f: &Fonts, cfg: &DeviceConfig, w: u32, h: u32, clock: &str, now: u64, coded: bool, wrong: bool, dark: bool, ink: usize, level: u8, charge: Charge) -> Canvas {
+fn lock(f: &Fonts, cfg: &DeviceConfig, w: u32, h: u32, clock: &str, now: u64, coded: bool, wrong: bool, dark: bool, ink: usize, level: u8, charge: Charge, typed: usize) -> Canvas {
     let mut app = App::new(Screen::Home, w, h, cfg.display.density as f32 / 160.0);
     app.state.lang = lang();
     app.state.dark = dark;
@@ -1650,7 +1709,7 @@ fn lock(f: &Fonts, cfg: &DeviceConfig, w: u32, h: u32, clock: &str, now: u64, co
         app.touch(Touch::Down(w as f32 / 2.0, h as f32 * 0.70), f, now + 100);
         app.touch(Touch::Move(w as f32 / 2.0, h as f32 * 0.45), f, now + 200);
         app.touch(Touch::Up, f, now + 300);
-        for ch in "5139".chars() {
+        for ch in "5139".chars().take(typed) {
             app.lock_key(Cap::Char(ch));
         }
     }

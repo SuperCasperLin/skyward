@@ -1908,28 +1908,29 @@ pub fn keypad_rects(t: &Theme, top: f32) -> Vec<(Rect, Cap)> {
 }
 
 /// The keypad a screen lock's code is typed on, its top at `top`: four rows
-/// of three round keys, `pressed` drawn held down, and the last row erasing
-/// and `enter` confirming, in `l`. Returns where each key answers a touch.
-pub fn keypad(c: &mut Canvas, t: &Theme, f: &Fonts, l: Lang, top: f32, pressed: Option<Cap>, enter: &str) -> Vec<(Rect, Cap)> {
+/// of three round keys, `pressed` drawn held down, the last row carrying
+/// `back` where a code is erased (or left) and `enter` where it is given.
+/// `enter_face` is the key's own face and the words on it; with `None` the
+/// key is drawn exactly as the digit keys are, so only its words differ.
+/// Returns where each key answers a touch.
+#[allow(clippy::too_many_arguments)]
+pub fn keypad(c: &mut Canvas, t: &Theme, f: &Fonts, top: f32, pressed: Option<Cap>, enter: &str, back: &str, enter_face: Option<(Rgba, Rgba)>) -> Vec<(Rect, Cap)> {
     let m = &t.m;
     let keys = keypad_rects(t, top);
     for &(r, cap) in &keys {
         let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
-        // Erasing and confirming carry their own words, and sit on the
-        // page rather than on a key of their own.
-        let bare = matches!(cap, Cap::Backspace | Cap::Enter);
-        let base = match cap {
-            Cap::Enter => t.pal.accent,
-            _ if bare => t.pal.bg,
-            _ => t.pal.card,
-        };
+        // All twelve stand on a key of their own: the erasing key used to
+        // be words alone on the page, which left the last row lopsided.
+        let base = if cap == Cap::Enter { enter_face.map_or(t.pal.card, |(base, _)| base) } else { t.pal.card };
         let fill = if pressed == Some(cap) { mix(base, t.pal.text, 0.16) } else { base };
-        if !bare || cap == Cap::Enter {
-            c.fill_circle(cx, cy, r.w / 2.0, fill);
-        }
+        c.fill_circle(cx, cy, r.w / 2.0, fill);
         match cap {
             Cap::Char(ch) => c.text_center(&f.heading, &ch.to_string(), cx, cy, m.dp(34.0), t.pal.text),
-            Cap::Backspace => c.text_center(&f.body, l.pick(["删除", "刪除", "Delete"]), cx, cy, m.row_title_px, t.pal.accent),
+            Cap::Backspace => c.text_center(&f.body, back, cx, cy, m.row_title_px, t.pal.accent),
+            Cap::Enter => {
+                let ink = enter_face.map_or(t.pal.text, |(_, ink)| ink);
+                c.text_center(&f.heading, enter, cx, cy, m.row_title_px, ink);
+            }
             _ => c.text_center(&f.heading, enter, cx, cy, m.row_title_px, Rgba::rgb(255, 255, 255)),
         }
     }
@@ -3134,6 +3135,21 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_erasing_key_stands_on_a_round_key_of_its_own() {
+        let t = Theme::light(1440, 3200, 3.5);
+        let f = crate::font::bundled();
+        let mut c = Canvas::new(t.m.w, keypad_height(&t).ceil() as u32 + 4);
+        c.clear(t.pal.bg);
+        let keys = keypad(&mut c, &t, &f, 0.0, None, "Decrypt", "Back", None);
+        let r = keys.iter().find(|(_, cap)| *cap == Cap::Backspace).map(|(r, _)| *r).expect("the last row has an erasing key");
+        // A point well inside the left of the circle, clear of the word.
+        let (x, y) = ((r.x + r.w * 0.15) as u32, (r.y + r.h / 2.0) as u32);
+        let i = (y * c.w + x) as usize * 4;
+        assert_eq!(&c.data[i..i + 3], &[t.pal.card.r, t.pal.card.g, t.pal.card.b], "the erasing key is a key, not words on the page");
+        assert_ne!(&c.data[i..i + 3], &[t.pal.bg.r, t.pal.bg.g, t.pal.bg.b], "and the page no longer shows through where it stood");
     }
 
     #[test]
