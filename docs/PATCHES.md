@@ -84,19 +84,21 @@ Shifted                     -> Letters     （单击取消一次性大写）
 时钟下面那一行是电量：一个与百分比同色的电池（圆角外壳 + 右侧极头，内部按电量填充），
 左图标右数字，两者一起居中——「锁屏电量」开关关掉就只剩百分比。
 
-颜色照状态栏那一套走，三种状态一一对应：
+颜色是三种状态三种颜色，锁屏与息屏显示用同一套：
 
-| 状态 | 状态栏 | 锁屏 |
+| 状态 | 颜色 | 含义 |
 | --- | --- | --- |
-| 平常 | `ink.level`（黑/白） | `lock_ink()`（深墨/白，跟锁屏文字同步） |
-| 插线 | `ink.charging`（`#1DCD3A`） | 同左，电池内多一个黄闪电 |
-| 低于 20% 且没插线 | `ink.low`（`#FA382E`/`#E64B3B`） | `#E64B3B` |
+| 平常（放电、≥20%） | `AOD_BLUE` `#5488F8` | 还剩多少 |
+| 插线 | `#1DCD3A` | 正在充，电池内多一个黄闪电 |
+| 低于 20% 且没插线 | `#E64B3B` | 该插线了 |
 
-阈值直接取状态栏的 `LOW_BATTERY`(20)，不再单设一个。
+阈值直接取状态栏的 `LOW_BATTERY`(20)，不再单设一个。这三种颜色不看锁屏字色，也不看
+玻璃明暗——蓝色在浅玻璃上是 3.3:1 的对比，字号 14dp 够读；换成黑白反而会让同一块电池
+在浅色页面和深色页面上各是一个样子，AOD 又是第三个样子。
 
-同一行也画在息屏显示上：`compose_battery()` 收一个「静止时用什么墨」的参数，锁屏给
-`lock_ink()`（深墨/白），AOD 给 `AOD_BLUE`，其余（几何、三态、闪电、开关）完全共用。AOD 的
-那一行跟着每分钟的位移走，`state.lock_battery` 关了它俩一起回到光秃秃的百分比。
+同一行也画在息屏显示上：`battery_ink(level, plugged)` 一处定色，`compose_battery()` 一处
+摆位，锁屏与 AOD 的几何、三态、闪电、开关完全共用，只有落点不同（`cy+112` 与 `cy+126`）。
+AOD 的那一行跟着每分钟的位移走，`state.lock_battery` 关了它俩一起回到光秃秃的百分比。
 
 闪电用黄色（`#FFD60A`）而不是电池色：充电既不是电量也不是警告，第三色不用解释，而且黄
 在绿填充和淡绿空槽上都读得出来。它只有一个形态，深浅模式共用，用两段凸多边形（`LOCK_BOLT_TOP`/
@@ -108,7 +110,7 @@ Shifted                     -> Letters     （单击取消一次性大写）
 |---|---|
 | `skyward-crypto/src/pin.rs` | 新增：`allowed()`（4–8 位纯数字）、`hash()`（scrypt N=2^13/r=8/p=1，16 字节 `/dev/urandom` 盐，输出 `s1$<位数>$<盐>$<哈希>`）、`check()`（常量时间比较）、`length()`、`read()`（一行只有一个解析器，`length` 由它派生，避免两处格式判断走偏） |
 | `skyward/src/pin.rs` | 新增：`Worker`，把拉伸放到后台线程，`pipe2(O_CLOEXEC\|O_NONBLOCK)` 唤醒主循环，`Done::{Saved,Checked}` 回传（与 `Decryptor` 同一个范式） |
-| `skyward-ui/src/app.rs` | `State.lock`/`lock_code`/`code_entry`；`Switch::Lock`、`Action::ForgetCode`、`Screen::SetCode`、`Effect::SaveCode`/`CheckCode`；`State.lock_ink`、`Screen::LockInk`、`Action::LockInk`；`App.locked`/`pulled`/`lock_from`/`lock_pressed`/`lock_typed`/`lock_wrong`/`lock_asking`/`lock_backdrop`；`LOCK_SLID`(0.6)、`LOCK_PULL_DP`(220)、`LOCK_WRONG_MS`(4000)、`LOCK_BLUR_SHRINK`(6)、`LOCK_BLUR_RADIUS`(3)、`LOCK_COLOUR`(1.55)、`LOCK_INK_WAYS`(3)/`LOCK_INK_FOLLOW`/`LOCK_INK_LIGHT`/`LOCK_INK_DARK`、`LOCK_LIGHT`(128)、`LOCK_MARK`/`LOCK_MARK_DIM`（亮玻璃上的深墨）、`LOCK_BATTERY_W_DP`(26)/`LOCK_BATTERY_H_DP`(12.5)/`LOCK_BATTERY_NUB_DP`/`LOCK_BATTERY_PAD_DP`/`LOCK_BATTERY_STROKE_DP`/`LOCK_BATTERY_GAP_DP`、`LOCK_BATTERY_GREEN`(`#1DCD3A`)/`LOCK_BATTERY_LOW`(`#E64B3B`)/`LOCK_BATTERY_LOW_LEVEL`(20，与状态栏同)、`LOCK_BOLT_YELLOW`(`#FFD60A`)、`LOCK_BOLT_W_DP`/`LOCK_BOLT_H_DP`/`LOCK_BOLT_TOP`/`LOCK_BOLT_FOOT`、`Switch::LockBattery`；`lock_battery_ink()`/`battery_ink()` 定颜色（前者按锁屏字色，后者收「静止墨色」，AOD 传 `AOD_BLUE`）、`battery_body()` 画那块电池（含充电时的闪电）、`compose_battery()` 把它与百分比摆成一行——锁屏与 AOD 共用这一支笔；`sleep()`/`lock_now()` 走 `lock_put()` 上锁（按键模式下跳过）、`touch()` 与 `key()` 在锁屏处收口、`lock_touch()`/`ask_code()`/`lock_key()`/`buzz()`/`code_typed()`/`unlock_panel()`/`code_saved()`/`code_checked()`/`forget_code()`；`compose_lock()` 及其两套版式（背景为 `Canvas::blurred()` 加 `saturate()` 的结果，一点不压暗）；`deadline()` 加错误提示到期 |
+| `skyward-ui/src/app.rs` | `State.lock`/`lock_code`/`code_entry`；`Switch::Lock`、`Action::ForgetCode`、`Screen::SetCode`、`Effect::SaveCode`/`CheckCode`；`State.lock_ink`、`Screen::LockInk`、`Action::LockInk`；`App.locked`/`pulled`/`lock_from`/`lock_pressed`/`lock_typed`/`lock_wrong`/`lock_asking`/`lock_backdrop`；`LOCK_SLID`(0.6)、`LOCK_PULL_DP`(220)、`LOCK_WRONG_MS`(4000)、`LOCK_BLUR_SHRINK`(6)、`LOCK_BLUR_RADIUS`(3)、`LOCK_COLOUR`(1.55)、`LOCK_INK_WAYS`(3)/`LOCK_INK_FOLLOW`/`LOCK_INK_LIGHT`/`LOCK_INK_DARK`、`LOCK_LIGHT`(128)、`LOCK_MARK`/`LOCK_MARK_DIM`（亮玻璃上的深墨）、`LOCK_BATTERY_W_DP`(26)/`LOCK_BATTERY_H_DP`(12.5)/`LOCK_BATTERY_NUB_DP`/`LOCK_BATTERY_PAD_DP`/`LOCK_BATTERY_STROKE_DP`/`LOCK_BATTERY_GAP_DP`、`LOCK_BATTERY_GREEN`(`#1DCD3A`)/`LOCK_BATTERY_LOW`(`#E64B3B`)/`LOCK_BATTERY_LOW_LEVEL`(20，与状态栏同)、`LOCK_BOLT_YELLOW`(`#FFD60A`)、`LOCK_BOLT_W_DP`/`LOCK_BOLT_H_DP`/`LOCK_BOLT_TOP`/`LOCK_BOLT_FOOT`、`Switch::LockBattery`；`battery_ink()` 定颜色（平常 `AOD_BLUE`、插线绿、低电红，锁屏与 AOD 同一个函数）、`battery_body()` 画那块电池（含充电时的闪电）、`compose_battery()` 把它与百分比摆成一行——锁屏与 AOD 共用这一支笔；`sleep()`/`lock_now()` 走 `lock_put()` 上锁（按键模式下跳过）、`touch()` 与 `key()` 在锁屏处收口、`lock_touch()`/`ask_code()`/`lock_key()`/`buzz()`/`code_typed()`/`unlock_panel()`/`code_saved()`/`code_checked()`/`forget_code()`；`compose_lock()` 及其两套版式（背景为 `Canvas::blurred()` 加 `saturate()` 的结果，一点不压暗）；`deadline()` 加错误提示到期 |
 | `skyward-ui/src/canvas.rs` | 新增 `blurred(factor, radius)`：按 `factor` 缩块平均、在缩图上做两次方框模糊、再双线性拉回全屏；`saturate(amount)`：把每个像素推离它自己的灰（0 为单色，1 不变，大于 1 加深），补回模糊洗掉的色；`luma()`：整块画布的平均亮度（Rec.709 权重），决定锁屏用深字还是白字。锁屏每次上锁只算一次，结果留在 `App.lock_backdrop` |
 | `skyward-ui/src/widgets.rs` | `keypad()` 的确认键文字改为入参（原来的「解密」写死），并拆出只算不画的 `keypad_rects()` 供锁屏命中；新增 `code_dots()` |
 | `skyward-ui/src/pages.rs` | 新页 `set_code()`（两步输入）与 `lock_ink()`（三种字色，`Trail::Check` 单选）；设置页「亮度」段之下新增「锁屏」段（开关 + 锁屏电量 + 解锁密码 + 锁屏文字行） |

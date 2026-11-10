@@ -153,11 +153,11 @@ fn main() -> Result<()> {
         eprintln!("font: {}", font.display());
         let (w, h) = (cfg.display.width, cfg.display.height);
         if looking == Some("--lock") {
-            // The battery the panel reads, in the three states the bar
-            // knows: 57% off the charger takes the words' ink, which over
-            // this light pane is the dark one and over the dark pane below
-            // is the light one; 8% is the red the bar warns with; and 37%
-            // on the charger is the bar's green with a yellow bolt in it.
+            // The battery the panel reads, in the three states it knows: 57%
+            // off the charger is the clock's blue, the same on this light
+            // pane as on the dark one below; 8% is the red the bar warns
+            // with; and 37% on the charger is the bar's green with a yellow
+            // bolt in it.
             let locks = [
                 ("lock-slide.png", 91_000u64, false, false, false, LOCK_INK_FOLLOW, 57, Charge::Discharging),
                 ("lock-code.png", 91_000, true, false, false, LOCK_INK_FOLLOW, 57, Charge::Discharging),

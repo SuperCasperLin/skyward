@@ -12,6 +12,7 @@ recovery 变成**原生支持 data 解密**的 Skyward。
   <img src="docs/images/lock.png" width="24%" alt="锁屏">
   <img src="docs/images/lock-dark.png" width="24%" alt="深色锁屏">
   <img src="docs/images/lock-charging.png" width="24%" alt="充电中的锁屏">
+  <img src="docs/images/lock-low.png" width="24%" alt="低电量的锁屏">
   <img src="docs/images/lock-ink.png" width="24%" alt="锁屏文字">
   <img src="docs/images/keys-caps.png" width="24%" alt="大写锁定">
 </p>
@@ -45,7 +46,7 @@ recovery 镜像当底座**——保留原厂的 init、adbd、SELinux 策略和�
 | **EFS 备份** | `[backup].efs` 列出 5 个分区：`modemst1`、`modemst2`、`fsg`（IMEI 所在）、`fsc`、`persist` | 同上 |
 | **日志导出** | `[wipe].logs`，让「导出日志」能选内部分区 | 同上 |
 | **息屏显示 AOD** | 屏幕熄灭后以 2% 背光显示时间、日期、电量，每分钟换一个位置防烧屏，轻触唤醒。电量与锁屏是同一行：电池图标 + 百分比，同一套颜色（平常蓝、插线绿带黄闪电、低于 20% 转红），「锁屏电量」开关一并管着 | `crates/skyward-ui` |
-| **锁屏** | 面板熄灭即上锁，再亮起来先看到锁屏：背景是当前页面的磨砂玻璃（模糊、不压暗），先上滑；设了密码才接着输密码，没设密码滑过六成就进页面。时钟下方一行是电池图标 + 电量，与状态栏同一套：平常黑白（浅色页面深墨、深色页面白字），插线时转绿并在电池里多一个黄闪电，低于 20% 且没插线时转红（可在「锁屏电量」里关掉）。字色在「锁屏文字」里选：跟随系统（按背景明暗自动）、浅色（深色字）、深色（白色字）。按键盘与解锁成功都有震动 | `crates/skyward-ui`、`crates/skyward-crypto` |
+| **锁屏** | 面板熄灭即上锁，再亮起来先看到锁屏：背景是当前页面的磨砂玻璃（模糊、不压暗），先上滑；设了密码才接着输密码，没设密码滑过六成就进页面。时钟下方一行是电池图标 + 电量，平常是息屏显示那支蓝（与 AOD 同一个蓝），插线时转绿并在电池里多一个黄闪电，低于 20% 且没插线时转红（可在「锁屏电量」里关掉）。字色在「锁屏文字」里选：跟随系统（按背景明暗自动）、浅色（深色字）、深色（白色字）。按键盘与解锁成功都有震动 | `crates/skyward-ui`、`crates/skyward-crypto` |
 | **大写锁定** | 双击 Shift 锁定大写（再双击解除），锁定态 Shift 键多一条横杠 | `crates/skyward-ui` |
 | **版本号** | About 页显示 `SW-v0.2.0-nuwa-v0.2.2`；更新检查仍用上游版本号 | `crates/skyward-info` |
 | **署名** | About 页在原作者之下加一行移植署名；许可页加「修改说明」（原作者版权行不改动） | `crates/skyward-ui` |

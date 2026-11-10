@@ -4818,15 +4818,15 @@ impl App {
         }
         if let Some(battery) = &info.battery {
             // The same reading the lock screen gives, a step under the day:
-            // the battery and its level, in the blue this clock keeps — or
+            // the battery and its level in the blue this clock keeps — or
             // in the bar's green and red, and with the bolt, once the
             // battery has something to say that a colour says better.
             let plugged = battery.charging();
-            let ink = Self::battery_ink(battery.level, plugged, AOD_BLUE);
             if self.state.lock_battery {
-                self.compose_battery(out, &t, f, battery.level, plugged, ink, (cx, cy + m.dp(126.0)));
+                self.compose_battery(out, &t, f, battery.level, plugged, (cx, cy + m.dp(126.0)));
             } else {
                 let level = format!("{}%", battery.level);
+                let ink = Self::battery_ink(battery.level, plugged);
                 out.text_center(&f.label, &level, cx, cy + m.dp(126.0), m.dp(14.0), ink);
             }
         }
@@ -4878,11 +4878,10 @@ impl App {
             // number that could be anything.
             let plugged = battery.charging();
             if self.state.lock_battery {
-                let ink = self.lock_battery_ink(battery.level, plugged);
-                self.compose_battery(out, &dark, f, battery.level, plugged, ink, (cx, cy + m.dp(112.0)));
+                self.compose_battery(out, &dark, f, battery.level, plugged, (cx, cy + m.dp(112.0)));
             } else {
                 let level = format!("{}%", battery.level);
-                let ink = self.lock_battery_ink(battery.level, plugged);
+                let ink = Self::battery_ink(battery.level, plugged);
                 out.text_center(&f.label, &level, cx, cy + m.dp(112.0), m.dp(14.0), ink);
             }
         }
@@ -4896,12 +4895,12 @@ impl App {
     /// The battery and the level it holds, standing round `at`: the battery
     /// to the left, the level's figures after it, the two read as one line
     /// and centred on it. The lock screen and the always-on clock show the
-    /// same reading, so they draw it with the same hand and differ only in
-    /// the ink a battery at rest takes — the pane's for one, the blue this
-    /// clock keeps for the other.
-    fn compose_battery(&self, out: &mut Canvas, t: &Theme, f: &Fonts, level: u8, plugged: bool, ink: Rgba, at: (f32, f32)) {
+    /// same reading, so they draw it with the same hand and the same three
+    /// colours — only where it stands differs.
+    fn compose_battery(&self, out: &mut Canvas, t: &Theme, f: &Fonts, level: u8, plugged: bool, at: (f32, f32)) {
         let m = &t.m;
         let (cx, cy) = at;
+        let ink = Self::battery_ink(level, plugged);
         let (bw, nw) = (m.dp(LOCK_BATTERY_W_DP), m.dp(LOCK_BATTERY_NUB_DP.0));
         let text = format!("{level}%");
         let px = m.dp(14.0);
@@ -4914,26 +4913,19 @@ impl App {
         out.text_center(&f.label, &text, left + bw + nw + gap + tw / 2.0, cy, px, ink);
     }
 
-    /// The colour the lock screen's battery and its figures take: the bar's
-    /// green while a charger is on, its red once the level is low and none
-    /// is, and otherwise the words' own ink — so a battery at rest is black
-    /// on a light pane and white on a dark one, following the mode with the
-    /// rest of the lock screen.
-    fn lock_battery_ink(&self, level: u8, plugged: bool) -> Rgba {
-        Self::battery_ink(level, plugged, self.lock_ink())
-    }
-
     /// The colour a battery and its figures take, as the stock bar takes it:
     /// the red it warns with once the level is low and no charger is, the
-    /// green it fills while a charger is on, and otherwise `rest`, the ink
-    /// the reading keeps wherever it stands.
-    fn battery_ink(level: u8, plugged: bool, rest: Rgba) -> Rgba {
+    /// green it fills while a charger is on, and otherwise the clock's blue —
+    /// the same blue on the lock screen as on the always-on clock, so the
+    /// reading is one thing wherever it is read, and the glass behind it
+    /// changes nothing about it.
+    fn battery_ink(level: u8, plugged: bool) -> Rgba {
         if !plugged && level < LOCK_BATTERY_LOW_LEVEL {
             LOCK_BATTERY_LOW
         } else if plugged {
             LOCK_BATTERY_GREEN
         } else {
-            rest
+            AOD_BLUE
         }
     }
 
@@ -12455,22 +12447,21 @@ mod tests {
         app.lock_now(0);
         app.compose(&mut c, &f, &i, "12:00", 0);
         // The battery stands left of the figures, on one line centred on the
-        // panel: a point inside its fill is the ink the level is written in,
-        // which over this light page is the dark one.
+        // panel: a point inside its fill is the blue the level is written in,
+        // the same blue on this light page as on the dark clock.
         let m = Theme::dark(W, H, PPD).m;
         let (bw, nw) = (m.dp(LOCK_BATTERY_W_DP), m.dp(LOCK_BATTERY_NUB_DP.0));
         let tw = c.text_width(&f.label, "52%", m.dp(14.0));
         let left = W as f32 / 2.0 - (bw + nw + m.dp(LOCK_BATTERY_GAP_DP) + tw) / 2.0;
         // A point inside the fill of a battery a little over half full.
         let (x, y) = (left + bw * 0.3, H as f32 * 0.26 + m.dp(112.0));
-        let ink = app.lock_ink();
-        assert_eq!(rgb(&c, x, y), (ink.r, ink.g, ink.b), "the fill is the ink the figures take");
+        assert_eq!(rgb(&c, x, y), (AOD_BLUE.r, AOD_BLUE.g, AOD_BLUE.b), "the fill is the blue the figures take");
         // With the switch off the battery is gone, and the figures stand
         // alone where they always did.
         app.state.lock_battery = false;
         app.lock_now(0);
         app.compose(&mut c, &f, &i, "12:00", 0);
-        assert_ne!(rgb(&c, x, y), (ink.r, ink.g, ink.b), "no battery is drawn once it is turned off");
+        assert_ne!(rgb(&c, x, y), (AOD_BLUE.r, AOD_BLUE.g, AOD_BLUE.b), "no battery is drawn once it is turned off");
     }
 
     #[test]
@@ -12511,22 +12502,17 @@ mod tests {
         assert!(yellow > 30, "on the charger a yellow bolt stands in the battery: {yellow}");
         let (left, yellow) = body(60, Charge::Discharging);
         assert_eq!(yellow, 0, "off it there is no bolt at all: {yellow}");
-        // A level clear of the mark, with no charger on, fills with the
-        // words' ink rather than a colour of its own.
-        let ink = app.lock_ink();
-        assert_eq!(rgb(&c, left + bw * 0.3, cy), (ink.r, ink.g, ink.b), "at rest the fill is the words' ink");
+        // A level clear of the mark, with no charger on, fills with the blue
+        // the clock keeps rather than the words' ink: the reading is the same
+        // reading on the lock screen as on the always-on clock.
+        assert_eq!(rgb(&c, left + bw * 0.3, cy), (AOD_BLUE.r, AOD_BLUE.g, AOD_BLUE.b), "at rest the fill is the clock's blue");
         // A level below the bar's own mark, with no charger on, fills red;
         // the mark itself does not; and with the cable in it is never a
         // warning but the green of a charger.
-        assert_eq!(app.lock_battery_ink(LOCK_BATTERY_LOW_LEVEL, false), ink, "the mark itself is not below it");
-        assert_eq!(app.lock_battery_ink(LOCK_BATTERY_LOW_LEVEL - 1, false), LOCK_BATTERY_LOW, "one under it warns in red");
-        assert_eq!(app.lock_battery_ink(3, true), LOCK_BATTERY_GREEN, "and charging is never a warning");
-        // The same rule stands wherever the reading is drawn: at rest it
-        // keeps the ink of its own place, which on the always-on clock is
-        // the blue that clock keeps.
-        assert_eq!(App::battery_ink(57, false, AOD_BLUE), AOD_BLUE, "at rest, the ink of where it stands");
-        assert_eq!(App::battery_ink(3, true, AOD_BLUE), LOCK_BATTERY_GREEN, "and a charger overrides it");
-        assert_eq!(App::battery_ink(3, false, AOD_BLUE), LOCK_BATTERY_LOW, "as does a level worth a word");
+        assert_eq!(App::battery_ink(LOCK_BATTERY_LOW_LEVEL, false), AOD_BLUE, "the mark itself is not below it");
+        assert_eq!(App::battery_ink(LOCK_BATTERY_LOW_LEVEL - 1, false), LOCK_BATTERY_LOW, "one under it warns in red");
+        assert_eq!(App::battery_ink(3, true), LOCK_BATTERY_GREEN, "and charging is never a warning");
+        assert_eq!(App::battery_ink(57, false), AOD_BLUE, "at rest, the blue both the lock screen and the clock keep");
     }
 
     #[test]
