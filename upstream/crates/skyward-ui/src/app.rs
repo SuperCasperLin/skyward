@@ -2537,6 +2537,12 @@ const LOCK_BLUR_SHRINK: u32 = 6;
 /// How wide a box the shrunk page is softened by, counted in its own cells.
 const LOCK_BLUR_RADIUS: u32 = 3;
 
+/// How often the glass over a page that keeps moving is taken again. The
+/// colour field behind the About page turns slowly: a quarter of a second
+/// changes it by under two levels out of 255, so a fresh blur now and then
+/// reads as continuous while costing a fraction of a blur every frame.
+const LOCK_BACKDROP_MS: u64 = 250;
+
 /// How far the blurred page's colours are pushed past the grey a blur
 /// leaves them at, so the pane keeps the page's hue instead of washing it
 /// out: a frosted pane deepens what it shows rather than flattening it.
@@ -2895,10 +2901,12 @@ pub struct App {
     /// stands where it was: this is what a code set adds to the slide, not
     /// what stands in its place.
     lock_asking: bool,
-    /// The page under the lock screen, blurred, made once for each time the
-    /// panel locks: a pull redraws the lock screen a frame at a time, and
-    /// what lies under it does not change while the lock stands.
+    /// The page under the lock screen, blurred. A still page gives it once
+    /// when the panel locks; one that keeps moving gives it again now and
+    /// then, no more often than `LOCK_BACKDROP_MS`.
     lock_backdrop: Option<Canvas>,
+    /// When the glass was last taken, for the pages that take it again.
+    lock_backdrop_at: u64,
     /// Whether the pane under the lock screen is a dark one, and so takes
     /// the light words rather than the dark — or, where the settings hold
     /// one colour, whether that colour is the light one.
@@ -3015,6 +3023,7 @@ impl App {
             lock_wrong: None,
             lock_asking: false,
             lock_backdrop: None,
+            lock_backdrop_at: 0,
             lock_dark: true,
             shift_at: None,
             charging: None,
@@ -3317,6 +3326,14 @@ impl App {
     /// Whether the About page's field is on screen, moving.
     fn glowing(&self) -> bool {
         self.glow.is_some() && self.display_on && self.top().1 < self.theme().m.dp(ABOUT_FIELD_DP)
+    }
+
+    /// Whether the page under the lock keeps changing while the lock stands.
+    /// The About page's colour field does — its clock runs on even with the
+    /// panel locked — and a still page costs nothing. Other pages that learn
+    /// to move can join here without touching the compose loop.
+    fn live_backdrop(&self) -> bool {
+        self.glowing()
     }
 
     /// Whether the bar's title and the bar belong over the rendered page
@@ -4773,31 +4790,37 @@ impl App {
         }
         let charge = self.charging.as_ref().map_or(0.0, |c| c.shown.level(now));
         // A locked panel's page is drawn once, for the lock screen to be
-        // seen through: it does not change while the lock stands, and
-        // drawing it again a frame at a time under a pull is work that
-        // shows nothing.
-        if charge < 1.0 && !(self.locked && self.lock_backdrop.is_some()) {
+        // seen through. The exception is a page that keeps moving under the
+        // lock: its glass is taken again now and then, not every frame —
+        // one blur costs 46 ms, while the colour behind it changes slowly.
+        let refresh = self.locked && charge < 1.0 && self.lock_backdrop.is_some()
+            && self.live_backdrop() && now.saturating_sub(self.lock_backdrop_at) >= LOCK_BACKDROP_MS;
+        if charge < 1.0 && (!self.locked || self.lock_backdrop.is_none() || refresh) {
             self.compose_page(out, f, info, clock, now);
         }
         // A locked panel shows the lock screen over the page, which waits
         // under it for the slide to be made.
         if self.locked {
-            if self.lock_backdrop.is_none() && charge < 1.0 {
+            if (self.lock_backdrop.is_none() || refresh) && charge < 1.0 {
                 let mut seen = out.blurred(LOCK_BLUR_SHRINK, LOCK_BLUR_RADIUS);
                 seen.saturate(LOCK_COLOUR);
-                // Nothing is laid over the page: no grey sheet, no shade at
-                // the head or the foot. What the pane carries decides the
-                // words instead — a light page takes dark words, a dark one
-                // light words, and neither is a grey it has to be rescued
-                // from. So the lock screen is as light as the page it is
-                // seen through. A hand that wants the words other than the
-                // pane would have them holds one colour here.
-                self.lock_dark = match self.state.lock_ink {
-                    LOCK_INK_LIGHT => false,
-                    LOCK_INK_DARK => true,
-                    _ => seen.luma() < LOCK_LIGHT,
-                };
+                // Only the first pane decides the words: taking another one
+                // as a colour field drifts must not flip black words to white
+                // halfway through a lock because its average crossed a line.
+                if self.lock_backdrop.is_none() {
+                    // Nothing is laid over the page: no grey sheet, no shade
+                    // at the head or the foot. What the pane carries decides
+                    // the words instead — a light page takes dark words, a
+                    // dark one light words. A hand that wants them otherwise
+                    // holds one colour here.
+                    self.lock_dark = match self.state.lock_ink {
+                        LOCK_INK_LIGHT => false,
+                        LOCK_INK_DARK => true,
+                        _ => seen.luma() < LOCK_LIGHT,
+                    };
+                }
                 self.lock_backdrop = Some(seen);
+                self.lock_backdrop_at = now;
             }
             self.compose_lock(out, f, info, clock, now);
         }
@@ -12559,6 +12582,46 @@ mod tests {
             assert_eq!(rgb(&c, x, dots_cy), (blue.r, blue.g, blue.b), "the dot is the decrypt page's blue");
             assert_ne!(rgb(&c, x, dots_cy), (ink.r, ink.g, ink.b), "and not the ink the words take");
         }
+    }
+
+    #[test]
+    fn a_moving_page_takes_the_glass_again_and_a_still_page_never_does() {
+        fn pane_ink(c: &Canvas) -> u64 {
+            c.data.as_chunks::<4>().0.iter().map(|p| p[0] as u64 + p[1] as u64 + p[2] as u64).sum()
+        }
+        let (f, i) = (fonts(), info());
+        // A still page keeps the first pane for as long as the lock stands.
+        let mut still = App::new(Screen::Home, W, H, PPD);
+        still.lock_now(0);
+        let mut c = Canvas::new(W, H);
+        still.compose(&mut c, &f, &i, "08:14", 0);
+        let first = still.lock_backdrop.as_ref().map(pane_ink);
+        for ms in (0..=1000).step_by(16) {
+            still.tick(ms);
+        }
+        still.compose(&mut c, &f, &i, "08:14", 1000);
+        assert_eq!(still.lock_backdrop.as_ref().map(pane_ink), first, "a still page keeps its first pane");
+        assert_eq!(still.lock_backdrop_at, 0, "and never takes another");
+
+        // The About page's colour field moves on under the lock.
+        let mut live = App::new(Screen::About, W, H, PPD);
+        live.tick(0);
+        live.lock_now(0);
+        live.compose(&mut c, &f, &i, "08:14", 0);
+        let first = live.lock_backdrop.as_ref().map(pane_ink).expect("the About page has a pane");
+        let words = live.lock_dark;
+        for ms in (0..=240).step_by(16) {
+            live.tick(ms);
+        }
+        live.compose(&mut c, &f, &i, "08:14", 240);
+        assert_eq!(live.lock_backdrop_at, 0, "short of a quarter second the old glass stays");
+        for ms in (240..=520).step_by(16) {
+            live.tick(ms);
+        }
+        live.compose(&mut c, &f, &i, "08:14", 520);
+        assert_eq!(live.lock_backdrop_at, 520, "then the glass is taken again");
+        assert_ne!(live.lock_backdrop.as_ref().map(pane_ink), Some(first), "and it shows the field where it has moved to");
+        assert_eq!(live.lock_dark, words, "the words keep their colour as the field drifts");
     }
 
     #[test]

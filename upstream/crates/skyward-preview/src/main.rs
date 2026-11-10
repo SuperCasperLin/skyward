@@ -138,7 +138,7 @@ fn main() -> Result<()> {
     // has gone off: a look at it without a phone, from the device's own
     // config and font where they are named.
     let looking = args.get(2).map(String::as_str);
-    if matches!(looking, Some("--aod" | "--lock" | "--bench-blur")) {
+    if matches!(looking, Some("--aod" | "--lock" | "--lock-about" | "--bench-blur")) {
         let near = |flag: &str| args.iter().position(|a| a == flag).and_then(|k| args.get(k + 1)).cloned();
         let config = near("--config")
             .map(PathBuf::from)
@@ -205,6 +205,60 @@ fn main() -> Result<()> {
                 }
             }
             println!("a minute tick moves a blurred pixel by {:.4}/255 on average, {max}/255 at most", sum as f64 / (w as f64 * h as f64 * 3.0));
+            // The About page is different: its colour field keeps moving
+            // under the lock. Measure how much of that survives the blur,
+            // and how far apart two refreshes can stand.
+            let ppd = cfg.display.density as f32 / 160.0;
+            let mut about = App::new(Screen::About, w, h, ppd);
+            let marks = [0u64, 100, 250, 500, 1000, 2000, 4000];
+            let mut panes = Vec::new();
+            for &ms in &marks {
+                about.tick(ms);
+                let mut page = Canvas::new(w, h);
+                about.compose(&mut page, &fonts, &info, CLOCK, ms);
+                let mut pane = page.blurred(6, 3);
+                pane.saturate(1.55);
+                panes.push(pane);
+            }
+            for (i, &ms) in marks.iter().enumerate().skip(1) {
+                let (mut diff, mut peak) = (0u64, 0u32);
+                for (a, b) in panes[0].data.as_chunks::<4>().0.iter().zip(panes[i].data.as_chunks::<4>().0.iter()) {
+                    for k in 0..3 {
+                        let d = (a[k] as i32 - b[k] as i32).unsigned_abs();
+                        diff += d as u64;
+                        peak = peak.max(d);
+                    }
+                }
+                println!("about glow after {ms:4} ms: {:.2}/255 mean, {peak}/255 max", diff as f64 / (w as f64 * h as f64 * 3.0));
+            }
+            // Two panes four seconds apart, for looking at the movement.
+            write_png(&out.join("about-glow-0.png"), &panes[0])?;
+            write_png(&out.join("about-glow-4s.png"), panes.last().expect("the last pane"))?;
+            return Ok(());
+        }
+        if looking == Some("--lock-about") {
+            // One lock held over the About page while its colour field
+            // keeps turning: the glass should follow it, a frame at a time.
+            let info = nezha(&cfg);
+            let ppd = cfg.display.density as f32 / 160.0;
+            let mut app = App::new(Screen::About, w, h, ppd);
+            app.state.lang = lang;
+            app.tick(0);
+            app.lock_now(0);
+            let mut c = Canvas::new(w, h);
+            for ms in (0..=4000).step_by(16) {
+                app.tick(ms);
+                app.compose(&mut c, &fonts, &info, "08:14", ms);
+                if ms == 0 {
+                    let path = out.join("lock-about-0.png");
+                    write_png(&path, &c)?;
+                    println!("wrote {}", path.display());
+                }
+            }
+            app.compose(&mut c, &fonts, &info, "08:14", 4000);
+            let path = out.join("lock-about-4s.png");
+            write_png(&path, &c)?;
+            println!("wrote {}", path.display());
             return Ok(());
         }
         if looking == Some("--lock") {

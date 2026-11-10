@@ -110,7 +110,7 @@ AOD 的那一行跟着每分钟的位移走，`state.lock_battery` 关了它俩�
 |---|---|
 | `skyward-crypto/src/pin.rs` | 新增：`allowed()`（4–8 位纯数字）、`hash()`（scrypt N=2^13/r=8/p=1，16 字节 `/dev/urandom` 盐，输出 `s1$<位数>$<盐>$<哈希>`）、`check()`（常量时间比较）、`length()`、`read()`（一行只有一个解析器，`length` 由它派生，避免两处格式判断走偏） |
 | `skyward/src/pin.rs` | 新增：`Worker`，把拉伸放到后台线程，`pipe2(O_CLOEXEC\|O_NONBLOCK)` 唤醒主循环，`Done::{Saved,Checked}` 回传（与 `Decryptor` 同一个范式） |
-| `skyward-ui/src/app.rs` | `State.lock`/`lock_code`/`code_entry`；`Switch::Lock`、`Action::ForgetCode`、`Screen::SetCode`、`Effect::SaveCode`/`CheckCode`；`State.lock_ink`、`Screen::LockInk`、`Action::LockInk`；`App.locked`/`pulled`/`lock_from`/`lock_pressed`/`lock_typed`/`lock_wrong`/`lock_asking`/`lock_backdrop`；`LOCK_SLID`(0.6)、`LOCK_PULL_DP`(220)、`LOCK_WRONG_MS`(4000)、`LOCK_BLUR_SHRINK`(6)、`LOCK_BLUR_RADIUS`(3)、`LOCK_COLOUR`(1.55)、`LOCK_INK_WAYS`(3)/`LOCK_INK_FOLLOW`/`LOCK_INK_LIGHT`/`LOCK_INK_DARK`、`LOCK_LIGHT`(128)、`LOCK_MARK`/`LOCK_MARK_DIM`（亮玻璃上的深墨）、`LOCK_BATTERY_W_DP`(26)/`LOCK_BATTERY_H_DP`(12.5)/`LOCK_BATTERY_NUB_DP`/`LOCK_BATTERY_PAD_DP`/`LOCK_BATTERY_STROKE_DP`/`LOCK_BATTERY_GAP_DP`、`LOCK_BATTERY_GREEN`(`#1DCD3A`)/`LOCK_BATTERY_LOW`(`#E64B3B`)/`LOCK_BATTERY_LOW_LEVEL`(20，与状态栏同)、`LOCK_BOLT_YELLOW`(`#FFD60A`)、`LOCK_BOLT_W_DP`/`LOCK_BOLT_H_DP`/`LOCK_BOLT_TOP`/`LOCK_BOLT_FOOT`、`Switch::LockBattery`；`battery_ink()` 定颜色（平常 `AOD_BLUE`、插线绿、低电红，锁屏与 AOD 同一个函数）、`battery_body()` 画那块电池（含充电时的闪电）、`compose_battery()` 把它与百分比摆成一行——锁屏与 AOD 共用这一支笔；`sleep()`/`lock_now()` 走 `lock_put()` 上锁（按键模式下跳过）、`touch()` 与 `key()` 在锁屏处收口、`lock_touch()`/`ask_code()`/`lock_key()`/`buzz()`/`code_typed()`/`unlock_panel()`/`code_saved()`/`code_checked()`/`forget_code()`；`compose_lock()` 及其两套版式（背景为 `Canvas::blurred()` 加 `saturate()` 的结果，一点不压暗）；`deadline()` 加错误提示到期 |
+| `skyward-ui/src/app.rs` | `State.lock`/`lock_code`/`code_entry`；`Switch::Lock`、`Action::ForgetCode`、`Screen::SetCode`、`Effect::SaveCode`/`CheckCode`；`State.lock_ink`、`Screen::LockInk`、`Action::LockInk`；`App.locked`/`pulled`/`lock_from`/`lock_pressed`/`lock_typed`/`lock_wrong`/`lock_asking`/`lock_backdrop`/`lock_backdrop_at`（v0.2.3 低频自适应动态模糊：`LOCK_BACKDROP_MS`(250)、`live_backdrop()`、`compose()` 里的 `refresh`；字色只在首帧判定）；`LOCK_SLID`(0.6)、`LOCK_PULL_DP`(220)、`LOCK_WRONG_MS`(4000)、`LOCK_BLUR_SHRINK`(6)、`LOCK_BLUR_RADIUS`(3)、`LOCK_COLOUR`(1.55)、`LOCK_INK_WAYS`(3)/`LOCK_INK_FOLLOW`/`LOCK_INK_LIGHT`/`LOCK_INK_DARK`、`LOCK_LIGHT`(128)、`LOCK_MARK`/`LOCK_MARK_DIM`（亮玻璃上的深墨）、`LOCK_BATTERY_W_DP`(26)/`LOCK_BATTERY_H_DP`(12.5)/`LOCK_BATTERY_NUB_DP`/`LOCK_BATTERY_PAD_DP`/`LOCK_BATTERY_STROKE_DP`/`LOCK_BATTERY_GAP_DP`、`LOCK_BATTERY_GREEN`(`#1DCD3A`)/`LOCK_BATTERY_LOW`(`#E64B3B`)/`LOCK_BATTERY_LOW_LEVEL`(20，与状态栏同)、`LOCK_BOLT_YELLOW`(`#FFD60A`)、`LOCK_BOLT_W_DP`/`LOCK_BOLT_H_DP`/`LOCK_BOLT_TOP`/`LOCK_BOLT_FOOT`、`Switch::LockBattery`；`battery_ink()` 定颜色（平常 `AOD_BLUE`、插线绿、低电红，锁屏与 AOD 同一个函数）、`battery_body()` 画那块电池（含充电时的闪电）、`compose_battery()` 把它与百分比摆成一行——锁屏与 AOD 共用这一支笔；`sleep()`/`lock_now()` 走 `lock_put()` 上锁（按键模式下跳过）、`touch()` 与 `key()` 在锁屏处收口、`lock_touch()`/`ask_code()`/`lock_key()`/`buzz()`/`code_typed()`/`unlock_panel()`/`code_saved()`/`code_checked()`/`forget_code()`；`compose_lock()` 及其两套版式（背景为 `Canvas::blurred()` 加 `saturate()` 的结果，一点不压暗）；`deadline()` 加错误提示到期 |
 | `skyward-ui/src/canvas.rs` | 新增 `blurred(factor, radius)`：按 `factor` 缩块平均、在缩图上做两次方框模糊、再双线性拉回全屏；`saturate(amount)`：把每个像素推离它自己的灰（0 为单色，1 不变，大于 1 加深），补回模糊洗掉的色；`luma()`：整块画布的平均亮度（Rec.709 权重），决定锁屏用深字还是白字。锁屏每次上锁只算一次，结果留在 `App.lock_backdrop` |
 | `skyward-ui/src/widgets.rs` | `keypad()` 的确认键与删除键文字改为入参，确认键整张脸（`enter_face`）也可由调用方指定——传 `None` 时与数字键完全同款；十二颗键一律画圆底，并拆出只算不画的 `keypad_rects()` 供锁屏命中；新增 `code_dots()` |
 | `skyward-ui/src/pages.rs` | 新页 `set_code()`（两步输入）与 `lock_ink()`（三种字色，`Trail::Check` 单选）；设置页「亮度」段之下新增「锁屏」段（开关 + 锁屏电量 + 解锁密码 + 锁屏文字行） |
@@ -123,13 +123,26 @@ AOD 的那一行跟着每分钟的位移走，`state.lock_battery` 关了它俩�
   第一眼看到的都是滑动页；密码设置与否只决定滑完之后进页面还是进键盘。
 - **锁屏期间不重画页面**：模糊背景已有缓存时，`compose()` 跳过 `compose_page()`——拉动时
   每帧只画锁屏本身，页面重画一遍纯属浪费（这一条也是模糊背景能用的前提）。
-  **没有做成每帧实时模糊**，不是做不到，是拿真机数据算过账（见下）。
+  **没有做成每帧实时模糊**，改成了低频自适应刷新（见下）。
 
-### 为什么模糊背景是静态缓存
+### 磨砂玻璃的低频自适应刷新（v0.2.3）
 
-`lock_backdrop` 在上锁时算一次（`blurred(6,3)` → `saturate(1.55)`），之后一直复用。
-改成实时只要去掉这个缓存、每帧重画页面再模糊一遍即可，但用
-`skyward-preview --bench-blur`（真机 1440×3200，20 帧取平均）量到：
+`lock_backdrop` 仍在上锁时算一次（`blurred(6,3)` → `saturate(1.55)`），但
+`compose()` 多算一个 `refresh`：
+
+```rust
+let refresh = self.locked && charge < 1.0 && self.lock_backdrop.is_some()
+    && self.live_backdrop() && now - self.lock_backdrop_at >= LOCK_BACKDROP_MS;
+```
+
+- `LOCK_BACKDROP_MS = 250`；`lock_backdrop_at` 记上次取玻璃的时刻。
+- `live_backdrop()` 现在只返回 `glowing()`——「关于本机」页的光晕可见且在动。
+  以后别的页面学会动，只改这一处。
+- `refresh` 为真才重画 `compose_page()` 并重新 `blurred()`；其余帧和所有静止
+  页面照旧复用缓存，零成本。
+- **`lock_dark` 只在 `lock_backdrop.is_none()`（上锁首帧）时按 `luma()` 判定**，
+  刷新时不动。否则光晕漂过明暗分界，时钟会从黑字突然翻成白字。
+- `charge == 1.0`（充电动画铺满）时不刷新，避免算一块看不见的背景。
 
 | 每帧的活 | 耗时 |
 |---|---|
@@ -142,13 +155,31 @@ AOD 的那一行跟着每分钟的位移走，`state.lock_battery` 关了它俩�
 真正贵的是把小图插值放大回 460 万像素、再逐像素 `saturate()` 写满 18 MB。
 要实时就得换算法（GPU / DRM plane 缩放），不是调参数能解决的。
 
-而收益几乎为零：锁屏时触摸被锁屏收口，底下的页面本来就是冻结的；唯一会变的是
-状态栏时钟和后台进度。让时钟从 08:14 跳到 08:15，两张模糊背景的像素差
-**平均 0.0019/255、最大 3/255**——1/6 缩小加两轮方框模糊把这点细节全洗掉了，
-肉眼根本看不出「动」。所以每帧多花 46 ms 换一个看不见的变化，不划算。
+收益要看底下的页面动什么。**第一版结论下错了**：拿状态栏时钟当变化源，
+让 08:14 跳到 08:15，两张模糊背景只差**平均 0.0019/255、最大 3/255**——
+1/6 缩小加两轮方框模糊把文字那种细节全洗掉了，便以为「实时也看不出动」。
 
-真想让锁屏显得「活」，成本最低的是**上滑视差**：手指拉动时把已缓存的磨砂背景
-轻微缩放/上移几个百分点，只是 `lay()` 时换个位置，不重算模糊，视觉上却明显。
+但**「关于本机」页背后是 `glow::GlowClock`**：四个软圆盘缓慢绕圈、颜色在三组间
+缓动（周期 5–8 秒），是整片整片的颜色流动，不是细节。`tick()` 在锁屏期间照常
+推进这个时钟，只是被缓存的背景挡住了。在同一张页面上重测模糊结果的像素差：
+
+| 隔多久 | 平均差 | 最大差 |
+|---|---|---|
+| 100 ms | 0.77/255 | 7/255 |
+| 250 ms | 1.82/255 | 18/255 |
+| 500 ms | 3.32/255 | 32/255 |
+| 1 s | 6.19/255 | 35/255 |
+| 4 s | **12.57/255** | **99/255** |
+
+4 秒的变化是时钟跳分钟的六千多倍，两张渲染图里粉 / 蓝 / 紫的位置明显挪了位，
+肉眼看得见。所以「实时动态模糊没有收益」这个结论**只对静止页面成立**。
+
+关键在于它变化很慢：每 250 ms 只走 1.82/255，因此不必每帧重算。
+一次 46 ms 摊到 250 ms 的 15 帧里约 3 ms/帧，刷新那一帧会掉两帧；
+两次刷新之间的颜色差小到看不出跳变。真机渲染核对：
+`--lock-about` 输出同一把锁在 0 s / 4 s 的两帧，粉 / 蓝 / 紫明显挪位而
+时钟字色不变。真正每帧 60 fps 的实时模糊仍需换 GPU / DRM plane 缩放通路；
+上滑视差是另一条更省的路（只把缓存背景轻微缩放/上移），留作以后。
 - **不压暗，让字色跟着玻璃走**：整层压暗会把浅色页面压成一片均匀的中灰（第一版就是这样，
   太闷），只压上下两端又会在中间留一道生硬的分界。索性一点不压：上锁时用 `luma()` 读一次
   玻璃的平均亮度，亮玻璃用深墨字、暗玻璃用白字。浅色页面上的锁屏因此是黑字，深色页面上
@@ -227,8 +258,8 @@ AOD 的那一行跟着每分钟的位移走，`state.lock_battery` 关了它俩�
 
 ```rust
 pub const UPSTREAM: &str = env!("CARGO_PKG_VERSION");   // 0.2.0，更新检查用这个
-pub const PORT: &str = "0.2.2";                         // 本移植的第几版
-pub const VERSION: &str = concat!("SW-v", env!("CARGO_PKG_VERSION"), "-nuwa-v0.2.2");
+pub const PORT: &str = "0.2.3";                         // 本移植的第几版
+pub const VERSION: &str = concat!("SW-v", env!("CARGO_PKG_VERSION"), "-nuwa-v0.2.3");
 ```
 
 `VERSION` 只用于展示（About 页、MTP 设备名、内核日志）；`crates/skyward/src/updates.rs`
