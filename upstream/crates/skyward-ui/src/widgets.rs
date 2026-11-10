@@ -1891,19 +1891,28 @@ pub fn keypad_height(t: &Theme) -> f32 {
     t.m.dp(PAD_TOP_DP + 4.0 * PAD_KEY_DP + 3.0 * PAD_GAP_Y_DP + PAD_BOTTOM_DP)
 }
 
-/// The keypad a screen lock's code is typed on, its top at `top`: four rows
-/// of three round keys, `pressed` drawn held down, and the last row erasing
-/// and confirming, in `l`. Returns where each key answers a touch.
-pub fn keypad(c: &mut Canvas, t: &Theme, f: &Fonts, l: Lang, top: f32, pressed: Option<Cap>) -> Vec<(Rect, Cap)> {
+/// Where each key of the keypad answers a touch when its top is at `top`,
+/// in the order they are drawn.
+pub fn keypad_rects(t: &Theme, top: f32) -> Vec<(Rect, Cap)> {
     let m = &t.m;
     let (size, gx, gy) = (m.dp(PAD_KEY_DP), m.dp(PAD_GAP_X_DP), m.dp(PAD_GAP_Y_DP));
     let left = (m.w as f32 - (3.0 * size + 2.0 * gx)) / 2.0;
-    let mut keys = Vec::with_capacity(PAD_KEYS.len());
-    for (i, &cap) in PAD_KEYS.iter().enumerate() {
-        let (row, col) = (i / 3, i % 3);
-        let r = Rect::new(left + col as f32 * (size + gx), top + m.dp(PAD_TOP_DP) + row as f32 * (size + gy), size, size);
-        keys.push((r, cap));
-    }
+    PAD_KEYS
+        .iter()
+        .enumerate()
+        .map(|(i, &cap)| {
+            let (row, col) = (i / 3, i % 3);
+            (Rect::new(left + col as f32 * (size + gx), top + m.dp(PAD_TOP_DP) + row as f32 * (size + gy), size, size), cap)
+        })
+        .collect()
+}
+
+/// The keypad a screen lock's code is typed on, its top at `top`: four rows
+/// of three round keys, `pressed` drawn held down, and the last row erasing
+/// and `enter` confirming, in `l`. Returns where each key answers a touch.
+pub fn keypad(c: &mut Canvas, t: &Theme, f: &Fonts, l: Lang, top: f32, pressed: Option<Cap>, enter: &str) -> Vec<(Rect, Cap)> {
+    let m = &t.m;
+    let keys = keypad_rects(t, top);
     for &(r, cap) in &keys {
         let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
         // Erasing and confirming carry their own words, and sit on the
@@ -1921,7 +1930,7 @@ pub fn keypad(c: &mut Canvas, t: &Theme, f: &Fonts, l: Lang, top: f32, pressed: 
         match cap {
             Cap::Char(ch) => c.text_center(&f.heading, &ch.to_string(), cx, cy, m.dp(34.0), t.pal.text),
             Cap::Backspace => c.text_center(&f.body, l.pick(["删除", "刪除", "Delete"]), cx, cy, m.row_title_px, t.pal.accent),
-            _ => c.text_center(&f.heading, l.pick(["解密", "解密", "Decrypt"]), cx, cy, m.row_title_px, Rgba::rgb(255, 255, 255)),
+            _ => c.text_center(&f.heading, enter, cx, cy, m.row_title_px, Rgba::rgb(255, 255, 255)),
         }
     }
     keys

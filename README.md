@@ -9,12 +9,13 @@ recovery 变成**原生支持 data 解密**的 Skyward。
   <img src="docs/images/decrypt-dark.png" width="24%" alt="解密 data">
   <img src="docs/images/settings-light.png" width="24%" alt="设置">
   <img src="docs/images/aod.png" width="24%" alt="息屏显示">
+  <img src="docs/images/lock.png" width="24%" alt="锁屏">
   <img src="docs/images/keys-caps.png" width="24%" alt="大写锁定">
 </p>
 
 | | |
 |---|---|
-| 当前版本 | `SW-v0.2.0-nuwa-v0.2.1`（上游基线 v0.2.0，本移植第 3 版） |
+| 当前版本 | `SW-v0.2.0-nuwa-v0.2.2`（上游基线 v0.2.0，本移植第 4 版） |
 | 适用机型 | 小米 13 Pro（`nuwa`），已验证 OS3.0.312.0.WMBCNXM / Android 16 / SDK 36 |
 | 系统要求 | 已解锁 Bootloader；A/B 分区；独立 `recovery` 分区 |
 | 移植 | Lin Zixi |
@@ -31,7 +32,7 @@ recovery 镜像当底座**——保留原厂的 init、adbd、SELinux 策略和�
 好处是显示、触摸、存储这些容易出问题的底层全部沿用原厂实现，稳定性和原厂 recovery 一致；
 代价是功能边界受原厂底座能力约束（例如能否解密 data，取决于有没有把厂商的 TEE 服务链拉起来）。
 
-本仓库做的是**移植**：为 `nuwa` 补齐配置、把 TEE 服务链拉起来、并补上两个上游没有的小功能。
+本仓库做的是**移植**：为 `nuwa` 补齐配置、把 TEE 服务链拉起来、并补上几个上游没有的小功能。
 
 ## 本移植相对上游做了什么
 
@@ -41,8 +42,9 @@ recovery 镜像当底座**——保留原厂的 init、adbd、SELinux 策略和�
 | **EFS 备份** | `[backup].efs` 列出 5 个分区：`modemst1`、`modemst2`、`fsg`（IMEI 所在）、`fsc`、`persist` | 同上 |
 | **日志导出** | `[wipe].logs`，让「导出日志」能选内部分区 | 同上 |
 | **息屏显示 AOD** | 屏幕熄灭后以 2% 背光显示时间、日期、电量，每分钟换一个位置防烧屏，轻触唤醒 | `crates/skyward-ui` |
+| **锁屏** | 面板熄灭即上锁，再亮起来先看到锁屏：默认上滑解锁，也可另设 4–8 位数字密码。手指和按键都先经过它 | `crates/skyward-ui`、`crates/skyward-crypto` |
 | **大写锁定** | 双击 Shift 锁定大写（再双击解除），锁定态 Shift 键多一条横杠 | `crates/skyward-ui` |
-| **版本号** | About 页显示 `SW-v0.2.0-nuwa-v0.2.1`；更新检查仍用上游版本号 | `crates/skyward-info` |
+| **版本号** | About 页显示 `SW-v0.2.0-nuwa-v0.2.2`；更新检查仍用上游版本号 | `crates/skyward-info` |
 | **署名** | About 页在原作者之下加一行移植署名；许可页加「修改说明」（原作者版权行不改动） | `crates/skyward-ui` |
 | **Windows 构建** | 两处可移植性补丁，见 [docs/PATCHES.md](docs/PATCHES.md) | `crates/skyward-bootimg`、`crates/skyward-config` |
 
@@ -62,6 +64,7 @@ recovery 镜像当底座**——保留原厂的 init、adbd、SELinux 策略和�
 | 安装 zip | ⚠️ 框架正常，但试的三个包本身不适用（一个缺 `update-binary`，两个要求 `/data/adb/magisk`，本机是 KernelSU） |
 | 息屏显示 | ✅ 15 s 无操作后背光 227 → 41（≈2%），轻触唤醒且不穿透点击 |
 | 大写锁定 | ✅ 双击锁定/解除，锁定后连续输入仍为大写 |
+| 锁屏 | ✅ 熄灭后注入轻触，背光 41 → 227，面板醒来停在锁屏；上滑手势可开锁。密码设置与手感待真机手动确认 |
 | 双系统 / OTA 自恢复 | ⬜ 未验证 |
 | 振动 / 文件管理 / 终端 | ⬜ 未单独验证 |
 
@@ -101,6 +104,7 @@ fastboot reboot recovery
 - `SW-v0.2.0-nuwa-v0.1.0` —— 第一版：打通 TEE 链，data 可解密
 - `SW-v0.2.0-nuwa-v0.2.0` —— 第二版：加 AOD、大写锁定、版本号
 - `SW-v0.2.0-nuwa-v0.2.1` —— 第三版（修订）：署名与修改声明
+- `SW-v0.2.0-nuwa-v0.2.2` —— 第四版：加锁屏（上滑解锁 / 数字密码）
 
 上游发新版后重新定基，编号随之变成 `SW-v0.3.0-nuwa-v0.1.0` 这样的形式，一眼能看出
 基于哪个上游、自己改到第几轮。

@@ -16,12 +16,13 @@ use std::str::FromStr;
 pub const UPSTREAM: &str = env!("CARGO_PKG_VERSION");
 
 /// The port's own revision: `0.1.0` the first build for nuwa, `0.2.0` the
-/// second, `0.2.1` the same build with the port named in it.
-pub const PORT: &str = "0.2.1";
+/// second, `0.2.1` the same build with the port named in it, `0.2.2` the
+/// one that locks the panel.
+pub const PORT: &str = "0.2.2";
 
 /// Version of this build, shown on the About page: the upstream release it
 /// is ported from and the port's revision, as the images are named.
-pub const VERSION: &str = concat!("SW-v", env!("CARGO_PKG_VERSION"), "-nuwa-v0.2.1");
+pub const VERSION: &str = concat!("SW-v", env!("CARGO_PKG_VERSION"), "-nuwa-v0.2.2");
 
 const CPU: &str = "/sys/devices/system/cpu";
 const POWER_SUPPLY: &str = "/sys/class/power_supply";

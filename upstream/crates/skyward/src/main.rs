@@ -20,6 +20,8 @@ mod merge;
 #[cfg(target_os = "android")]
 mod partwork;
 #[cfg(target_os = "android")]
+mod pin;
+#[cfg(target_os = "android")]
 mod pty;
 #[cfg(target_os = "android")]
 mod readings;

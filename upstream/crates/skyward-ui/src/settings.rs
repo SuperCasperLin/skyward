@@ -44,6 +44,12 @@ pub struct Settings {
     pub screen_off: u64,
     /// The always-on clock shows on the panel while the screen is off.
     pub aod: bool,
+    /// The panel locks when it goes off, so that a hand touching it opens
+    /// the pages only after the lock screen is slid away.
+    pub lock: bool,
+    /// The code that opens the lock screen, salted and hashed; empty for a
+    /// slide alone.
+    pub lock_code: String,
     /// The time zone, by its name in the tz database.
     pub time_zone: String,
     pub vibrate: bool,
@@ -125,6 +131,8 @@ impl Settings {
             brightness: state.brightness,
             screen_off: SCREEN_OFF[state.screen_off].map_or(0, |ms| ms / 1000),
             aod: state.aod,
+            lock: state.lock,
+            lock_code: state.lock_code.clone(),
             time_zone: TIME_ZONES[state.time_zone].2.to_string(),
             vibrate: state.vibrate,
             vibration: state.vibration,
@@ -180,6 +188,8 @@ impl Settings {
             state.screen_off = at;
         }
         state.aod = self.aod;
+        state.lock = self.lock;
+        state.lock_code = self.lock_code.clone();
         if let Some(at) = TIME_ZONES.iter().position(|zone| zone.2 == self.time_zone) {
             state.time_zone = at;
         }

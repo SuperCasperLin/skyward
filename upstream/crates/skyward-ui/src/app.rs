@@ -100,6 +100,9 @@ pub enum Screen {
     FontLicense,
     /// Which slot the phone starts from next.
     Slot,
+    /// The code the recovery's own lock screen is opened with: typed twice,
+    /// the second time to be sure of the first.
+    SetCode,
     /// The installed system and the one Skyward installed beside it: which
     /// of them starts, switching between them, and taking the other away.
     Systems,
@@ -561,6 +564,8 @@ pub enum Switch {
     ShowPassword,
     /// Show the always-on clock on the panel while the screen is off.
     Aod,
+    /// Lock the panel when it goes off.
+    Lock,
 }
 
 /// What a backup can take, in the order the backup page lists it.
@@ -1185,6 +1190,9 @@ pub enum Action {
     Confirm(Confirm),
     /// The pattern grid on the unlock page.
     Pattern,
+    /// Forget the code the lock screen is opened with, so a slide alone
+    /// opens it.
+    ForgetCode,
     /// Start receiving a package over USB.
     Sideload,
     /// Send the image to one of the partitions it fits.
@@ -1591,6 +1599,15 @@ pub struct State {
     pub screen_off: usize,
     /// The always-on clock shows on the panel while the screen is off.
     pub aod: bool,
+    /// The panel locks when it goes off: a touch then opens the lock screen,
+    /// and the pages only after it is slid away.
+    pub lock: bool,
+    /// The code the lock screen is opened with, salted and hashed; empty
+    /// while a slide alone opens it.
+    pub lock_code: String,
+    /// The code being set on the code page: what has been typed, and the
+    /// first of the two entries once it has been made.
+    pub code_entry: Option<CodeEntry>,
     /// The time zone the clock and the times on the pages keep, by its
     /// place in [`TIME_ZONES`].
     pub time_zone: usize,
@@ -1770,6 +1787,11 @@ impl Default for State {
             // The clock on the dark panel, as the phone's own system shows
             // it, and the surest sign that a recovery still runs.
             aod: true,
+            // Locked as the phone's own system locks it, but only once the
+            // panel has gone off: a recovery just started is in a hand.
+            lock: true,
+            lock_code: String::new(),
+            code_entry: None,
             time_zone: 0,
             vibrate: true,
             vibration: SLIDER_START,
@@ -2024,6 +2046,13 @@ pub enum Effect {
     /// lock, telling what still waits with [`App::data_waiting`] or why it
     /// did not open with [`App::unlock_failed`].
     Unlock { user: u32, code: String },
+    /// Keep `code`, salted and hashed, as the code the lock screen is
+    /// opened with, telling how it went with [`App::code_saved`].
+    SaveCode(String),
+    /// Check what was typed on the lock screen against the code kept,
+    /// telling the answer with [`App::code_checked`]. The work is a stretch
+    /// of the code, so it is done off the screen's own thread.
+    CheckCode { recorded: String, typed: String },
     /// Hand the USB port back from fastboot to adb, bring up what the
     /// recovery runs from the slot's partitions, then show its pages with
     /// [`App::enter_recovery`].
@@ -2468,6 +2497,26 @@ const AOD_HINT_MS: u64 = 8000;
 /// the capitals on, as tapping it twice does on a phone's own keyboard.
 const CAPS_MS: u64 = 400;
 
+/// How far up the lock screen's track the finger has to be pulled before
+/// letting go opens it, of the track's whole length.
+const LOCK_SLID: f32 = 0.6;
+
+/// How much of the screen's height a pull up the lock screen takes at the
+/// top, so that one long drag opens it rather than crossing the whole panel.
+const LOCK_PULL_DP: f32 = 220.0;
+
+/// How long the words that turn a code down stay under it.
+const LOCK_WRONG_MS: u64 = 4000;
+
+/// The lock screen's inks on the page it covers.
+const LOCK_INK: Rgba = Rgba::rgb(0xF2, 0xF2, 0xF2);
+const LOCK_DIM: Rgba = Rgba::rgb(0x9A, 0x9A, 0x9A);
+
+/// The shortest and the longest code the lock screen takes, in digits: the
+/// same as the hashing side keeps, which refuses anything else.
+const CODE_MIN: usize = 4;
+const CODE_MAX: usize = 8;
+
 /// Where a pinned strip shows on a page scrolled to `offset`: with the page,
 /// or just under the bar once the page has carried it that far.
 fn pinned_top(t: &Theme, p: &Pinned, offset: f32) -> f32 {
@@ -2623,6 +2672,22 @@ fn keyboard_strip(t: &Theme, frame: &Frame) -> (Canvas, i32) {
     (strip, top)
 }
 
+/// The code being set on the code page: what has been typed so far, and the
+/// first of the two entries, once it has been made.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CodeEntry {
+    pub typed: String,
+    pub first: Option<String>,
+    /// Why the entry was turned down, in words the page shows under it.
+    pub error: Option<&'static str>,
+}
+
+impl CodeEntry {
+    fn new() -> CodeEntry {
+        CodeEntry { typed: String::new(), first: None, error: None }
+    }
+}
+
 pub struct App {
     pub state: State,
     /// The pages open, the one shown last: each with how far it is
@@ -2723,6 +2788,20 @@ pub struct App {
     /// wrote it, and when the screen went off with it to show.
     aod_day: String,
     aod_since: Option<u64>,
+    /// The panel is locked: the lock screen stands over the page, which
+    /// takes nothing until it is opened.
+    locked: bool,
+    /// How far the lock screen's slide has been pulled up, 0 to 1.
+    pulled: f32,
+    /// Where the finger pulling it landed, while it is down.
+    lock_from: Option<f32>,
+    /// The key of the lock screen's keypad held down, if one is.
+    lock_pressed: Option<Cap>,
+    /// What has been typed on the lock screen's keypad.
+    lock_typed: String,
+    /// When a code was last turned down, for the words that say so.
+    lock_wrong: Option<u64>,
+
     /// When the shift key was last tapped, for telling a second tap in a
     /// row from one on its own.
     shift_at: Option<u64>,
@@ -2775,8 +2854,15 @@ pub struct App {
 
 impl App {
     pub fn new(start: Screen, w: u32, h: u32, px_per_dp: f32) -> Self {
+        let mut state = State::default();
+        // A code page shown as the first page was not opened through the
+        // row that opens it, so the entry it sets a code in is made here,
+        // as `open` makes it.
+        if start == Screen::SetCode {
+            state.code_entry = Some(CodeEntry::new());
+        }
         App {
-            state: State::default(),
+            state,
             stack: vec![(start, 0.0, Focus::Unset)],
             frame: None,
             spots: None,
@@ -2819,6 +2905,12 @@ impl App {
             darkening: None,
             aod_day: String::new(),
             aod_since: None,
+            locked: false,
+            pulled: 0.0,
+            lock_from: None,
+            lock_pressed: None,
+            lock_typed: String::new(),
+            lock_wrong: None,
             shift_at: None,
             charging: None,
             charge_art: None,
@@ -2919,7 +3011,12 @@ impl App {
             .filter(|_| !self.display_on && self.state.aod)
             .map(|since| since + AOD_HINT_MS)
             .filter(|&at| at > now);
-        [self.toast.as_ref().map(|t| t.1), easing, self.idle_due(), held, repeat, blink, darkens, chord, hint].into_iter().flatten().min()
+        // The words a wrong code is met with go on their own too.
+        let wrong = self.lock_wrong.filter(|_| self.locked).map(|at| at + LOCK_WRONG_MS).filter(|&at| at > now);
+        [self.toast.as_ref().map(|t| t.1), easing, self.idle_due(), held, repeat, blink, darkens, chord, hint, wrong]
+            .into_iter()
+            .flatten()
+            .min()
     }
 
     /// Whether a text field's cursor shows at `now`, and when it next turns;
@@ -3216,6 +3313,200 @@ impl App {
         self.stir(now);
     }
 
+    /// Whether the lock screen stands between the finger and the pages.
+    pub fn locked(&self) -> bool {
+        self.locked
+    }
+
+    /// Lock the panel now, as going off does, for a page that wants to show
+    /// the lock screen without waiting for the screen-off time. It is the
+    /// panel that locks, not the setting: what the settings page keeps is
+    /// left as it is.
+    pub fn lock_now(&mut self, now: u64) {
+        self.locked = true;
+        self.pulled = 0.0;
+        self.lock_from = None;
+        self.lock_typed.clear();
+        self.lock_wrong = None;
+        self.lock_pressed = None;
+        self.dirty = true;
+        self.stir(now);
+    }
+
+    /// What a finger on the lock screen does: pull the slide up, or type on
+    /// the keypad when the code is set.
+    fn lock_touch(&mut self, ev: Touch, now: u64) -> Vec<Effect> {
+        self.stir(now);
+        let coded = !self.state.lock_code.is_empty();
+        match ev {
+            Touch::Down(x, y) if coded => {
+                let t = self.theme();
+                let top = t.m.h as f32 - widgets::keypad_height(&t);
+                let key = widgets::keypad_rects(&t, top).into_iter().find(|(rect, _)| rect.contains(x, y)).map(|(_, cap)| cap);
+                if let Some(cap) = key {
+                    self.lock_pressed = Some(cap);
+                    self.dirty = true;
+                }
+                Vec::new()
+            }
+            Touch::Down(_, y) => {
+                self.lock_from = Some(y);
+                self.pulled = 0.0;
+                Vec::new()
+            }
+            Touch::Move(_, y) => {
+                if let Some(from) = self.lock_from {
+                    let span = self.theme().m.dp(LOCK_PULL_DP).max(1.0);
+                    let pulled = ((from - y) / span).clamp(0.0, 1.0);
+                    if (pulled - self.pulled).abs() > f32::EPSILON {
+                        self.pulled = pulled;
+                        self.dirty = true;
+                    }
+                }
+                Vec::new()
+            }
+            Touch::Up if coded => {
+                let pressed = self.lock_pressed.take();
+                self.dirty = true;
+                match pressed {
+                    Some(cap) => self.lock_key(cap),
+                    None => Vec::new(),
+                }
+            }
+            Touch::Up => {
+                let pulled = std::mem::take(&mut self.pulled);
+                let pulled_up = self.lock_from.take().is_some_and(|_| pulled >= LOCK_SLID);
+                self.dirty = true;
+                if pulled_up {
+                    self.unlock_panel(now);
+                }
+                Vec::new()
+            }
+        }
+    }
+
+    /// A key of the lock screen's keypad: a digit typed, one erased, or the
+    /// code given to be checked.
+    pub fn lock_key(&mut self, cap: Cap) -> Vec<Effect> {
+        match cap {
+            Cap::Char(ch) => {
+                if self.lock_typed.chars().count() < CODE_MAX {
+                    self.lock_typed.push(ch);
+                    self.lock_wrong = None;
+                }
+            }
+            Cap::Backspace => {
+                self.lock_typed.pop();
+                self.lock_wrong = None;
+            }
+            Cap::Enter => {
+                let typed = std::mem::take(&mut self.lock_typed);
+                if typed.chars().count() < CODE_MIN {
+                    self.lock_typed = typed;
+                    return Vec::new();
+                }
+                self.dirty = true;
+                return vec![Effect::CheckCode { recorded: self.state.lock_code.clone(), typed }];
+            }
+            _ => {}
+        }
+        self.dirty = true;
+        Vec::new()
+    }
+
+    /// The runtime checked what was typed against the code kept: the panel
+    /// opens for the right one, and says so for a wrong one.
+    pub fn code_checked(&mut self, right: bool, now: u64) {
+        if right {
+            self.unlock_panel(now);
+        } else {
+            self.lock_typed.clear();
+            self.lock_wrong = Some(now);
+            self.dirty = true;
+        }
+    }
+
+    /// Open the lock screen: the page under it takes the finger again.
+    fn unlock_panel(&mut self, now: u64) {
+        self.locked = false;
+        self.pulled = 0.0;
+        self.lock_from = None;
+        self.lock_typed.clear();
+        self.lock_wrong = None;
+        self.lock_pressed = None;
+        self.dirty = true;
+        self.stir(now);
+        self.refresh();
+    }
+
+    /// The runtime kept the code typed on the code page, or could not:
+    /// the lock screen is opened with it from now on.
+    pub fn code_saved(&mut self, hashed: Result<String, String>, now: u64) {
+        match hashed {
+            Ok(hashed) => {
+                self.state.lock_code = hashed;
+                self.say("解锁密码已保存", now);
+                self.back(now);
+            }
+            Err(why) => self.say(&why, now),
+        }
+        self.refresh();
+    }
+
+    /// Forget the code, so a slide alone opens the lock screen.
+    pub fn forget_code(&mut self, now: u64) {
+        self.state.lock_code.clear();
+        self.lock_typed.clear();
+        self.say("已取消解锁密码", now);
+        self.refresh();
+    }
+
+    /// A key of the code page's keypad: a digit typed, one erased, or an
+    /// entry given over to the second, which saves the code once both are
+    /// the same.
+    fn code_typed(&mut self, cap: Cap) -> Vec<Effect> {
+        let l = self.state.lang;
+        let too_short = l.pick(["密码至少 4 位", "密碼至少 4 位", "A code is 4 digits or more"]);
+        let differs = l.pick(["两次输入不一致", "兩次輸入不一致", "The two do not match"]);
+        let mut save = None;
+        if let Some(entry) = self.state.code_entry.as_mut() {
+            match cap {
+                Cap::Char(ch) if ch.is_ascii_digit() => {
+                    if entry.typed.chars().count() < CODE_MAX {
+                        entry.typed.push(ch);
+                        entry.error = None;
+                    }
+                }
+                Cap::Backspace => {
+                    entry.typed.pop();
+                    entry.error = None;
+                }
+                Cap::Enter => {
+                    let typed = std::mem::take(&mut entry.typed);
+                    if typed.chars().count() < CODE_MIN {
+                        entry.typed = typed;
+                        entry.error = Some(too_short);
+                    } else {
+                        match entry.first.clone() {
+                            None => {
+                                entry.first = Some(typed);
+                                entry.error = None;
+                            }
+                            Some(first) if first == typed => save = Some(typed),
+                            Some(_) => {
+                                entry.first = None;
+                                entry.error = Some(differs);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        self.refresh();
+        save.map(|code| vec![Effect::SaveCode(code)]).unwrap_or_default()
+    }
+
     /// A charger or a computer was attached, `cable_in`, or taken away: the
     /// dark panel lights, and a lit one stays at full brightness for the
     /// screen-off time from now, as on the phone's own system. A cable
@@ -3277,6 +3568,19 @@ impl App {
         // The always-on clock comes up as the content goes dark, and says
         // how to wake the panel for a moment.
         self.aod_since = Some(now);
+        // A panel that locks does it as it goes off, as the phone's own
+        // does: what was typed is forgotten, and the slide starts again.
+        // A panel whose keys work the page is left open: it has no finger
+        // to make the slide with, and a lock it could not open is a page
+        // out of reach.
+        if self.state.lock && !self.keys {
+            self.locked = true;
+            self.pulled = 0.0;
+            self.lock_from = None;
+            self.lock_typed.clear();
+            self.lock_wrong = None;
+            self.lock_pressed = None;
+        }
         self.dirty = true;
         self.bright = full_brightness();
         match std::mem::replace(&mut self.drag, Drag::Idle) {
@@ -4319,6 +4623,13 @@ impl App {
         if charge < 1.0 {
             self.compose_page(out, f, info, clock, now);
         }
+        // A locked panel shows the lock screen over the page, which waits
+        // under it for the slide to be made.
+        if self.locked {
+            self.compose_lock(out, f, info, clock, now);
+        }
+        // The charging screen is a panel of its own and covers both: it is
+        // what a cable going in lights the screen for, whatever was under it.
         if charge > 0.0 {
             self.compose_charging(out, f, info, charge, now);
         }
@@ -4351,6 +4662,75 @@ impl App {
             let hint = self.state.lang.pick(["轻触屏幕唤醒", "輕觸螢幕喚醒", "Touch to wake"]);
             let cx = out.w as f32 / 2.0;
             out.text_center(&f.label, hint, cx, out.h as f32 - m.dp(110.0), m.dp(14.0), AOD_FAINT);
+        }
+    }
+
+    /// The lock screen: the time over a panel gone dark, and under it the
+    /// slide that opens the pages, or the keypad the code is typed on. It is
+    /// drawn on the dark palette whatever the pages below it use, as the
+    /// phone's own lock screen is dark over a light system.
+    fn compose_lock(&mut self, out: &mut Canvas, f: &Fonts, info: &DeviceInfo, clock: &str, now: u64) {
+        let dark = Theme::dark(self.w, self.h, self.px_per_dp);
+        let m = dark.m;
+        let cx = out.w as f32 / 2.0;
+        out.clear(Rgba::rgb(0, 0, 0));
+        let coded = !self.state.lock_code.is_empty();
+        // With a keypad under it the clock stands higher, above the dots.
+        let cy = out.h as f32 * if coded { 0.20 } else { 0.34 };
+        out.text_center(&f.title, clock, cx, cy, m.dp(96.0), LOCK_INK);
+        if !self.aod_day.is_empty() {
+            out.text_center(&f.body, &self.aod_day, cx, cy + m.dp(74.0), m.dp(17.0), LOCK_DIM);
+        }
+        if let Some(battery) = &info.battery {
+            let level = format!("{}%", battery.level);
+            out.text_center(&f.label, &level, cx, cy + m.dp(112.0), m.dp(14.0), AOD_BLUE);
+        }
+        if coded {
+            self.compose_lock_code(out, f, &dark, cx, now);
+        } else {
+            self.compose_lock_slide(out, f, &dark, cx);
+        }
+    }
+
+    /// The slide that opens a lock screen with no code: a track up the
+    /// middle of the panel's foot, its knob travelling with the finger.
+    fn compose_lock_slide(&self, out: &mut Canvas, f: &Fonts, t: &Theme, cx: f32) {
+        let m = &t.m;
+        let h = out.h as f32;
+        let (track_w, track_h) = (m.dp(56.0), m.dp(168.0));
+        let track = Rect::new(cx - track_w / 2.0, h - m.dp(96.0) - track_h, track_w, track_h);
+        out.fill_round_rect(track.x, track.y, track.w, track.h, track_w / 2.0, Rgba::rgb(0x1E, 0x1E, 0x1E));
+        // An arrow at the top of the track brightens as the pull nears its
+        // end, as the page's own swipe cue does.
+        let arrow = crate::color::mix(LOCK_DIM, LOCK_INK, self.pulled);
+        let (ax, ay) = (cx, track.y + m.dp(22.0));
+        let s = m.dp(7.0);
+        out.line(ax - s, ay + s * 0.4, ax, ay - s * 0.6, m.dp(2.0), arrow);
+        out.line(ax, ay - s * 0.6, ax + s, ay + s * 0.4, m.dp(2.0), arrow);
+        let knob_r = m.dp(24.0);
+        let travel = track.h - knob_r * 2.0 - m.dp(8.0);
+        let knob_cy = track.y + track.h - knob_r - m.dp(4.0) - self.pulled * travel;
+        out.fill_circle(cx, knob_cy, knob_r, Rgba::rgb(0xE8, 0xE8, 0xE8));
+        // The words stand above the track until the finger carries it up.
+        if self.pulled < 0.05 {
+            let hint = self.state.lang.pick(["上滑解锁", "上滑解鎖", "Swipe up to unlock"]);
+            out.text_center(&f.label, hint, cx, track.y - m.dp(24.0), m.dp(14.0), LOCK_DIM);
+        }
+    }
+
+    /// The keypad a lock screen with a code is opened on, the dots of what
+    /// has been typed above it, and the words a wrong code is met with.
+    fn compose_lock_code(&mut self, out: &mut Canvas, f: &Fonts, t: &Theme, cx: f32, now: u64) {
+        let m = &t.m;
+        let l = self.state.lang;
+        let top = out.h as f32 - widgets::keypad_height(t);
+        widgets::keypad(out, t, f, l, top, self.lock_pressed, l.pick(["解锁", "解鎖", "Unlock"]));
+        let dots_cy = top - m.dp(52.0);
+        widgets::code_dots(out, t, cx, dots_cy, self.lock_typed.chars().count());
+        let wrong = self.lock_wrong.is_some_and(|at| now < at + LOCK_WRONG_MS);
+        if wrong {
+            let text = l.pick(["密码错误，请重试", "密碼錯誤，請重試", "Wrong code, try again"]);
+            out.text_center(&f.body, text, cx, dots_cy - m.dp(40.0), m.dp(15.0), Rgba::rgb(0xE0, 0x5A, 0x4E));
         }
     }
 
@@ -4835,6 +5215,11 @@ impl App {
     /// Open `screen` over the page shown, sliding in over it.
     fn open(&mut self, screen: Screen) {
         self.leave(false);
+        // The code page takes a code from nothing each time it opens, and
+        // forgets a half of one left behind.
+        if screen == Screen::SetCode {
+            self.state.code_entry = Some(CodeEntry::new());
+        }
         self.push(screen);
     }
 
@@ -5288,6 +5673,7 @@ impl App {
                 let on = match switch {
                     Switch::Vibrate => &mut self.state.vibrate,
                     Switch::Aod => &mut self.state.aod,
+                    Switch::Lock => &mut self.state.lock,
                     Switch::FileTransfer => &mut self.state.file_transfer,
                     Switch::Compress => &mut self.state.compress,
                     Switch::Verify => &mut self.state.verify,
@@ -5538,7 +5924,9 @@ impl App {
             }
             Action::Type(cap) if self.screen() == Screen::Terminal => return self.term_typed(cap, now),
             Action::Type(cap) if self.screen() == Screen::Editor => self.edit_typed(cap, now),
+            Action::Type(cap) if self.screen() == Screen::SetCode => return self.code_typed(cap),
             Action::Type(cap) => return self.type_key(cap, now),
+            Action::ForgetCode => self.forget_code(now),
             Action::TermKey(key) if self.screen() == Screen::Editor => {
                 let ed = self.state.editor.as_mut().expect("the editor page shows a file");
                 match key {
@@ -6124,18 +6512,32 @@ impl App {
         if !self.display_on {
             if self.state.aod && matches!(ev, Touch::Down(..)) {
                 self.wake(now);
+                // A locked panel takes the same finger: the lock screen
+                // comes up under it, and a pull begins where it landed.
+                if self.locked {
+                    if let Touch::Down(_, y) = ev {
+                        self.lock_from = Some(y);
+                        self.pulled = 0.0;
+                    }
+                    self.dirty = true;
+                    return Vec::new();
+                }
                 self.drag = Drag::Waking;
             }
             return Vec::new();
         }
-        // A finger on the charging screen sends it away for the page, and
-        // does nothing else until it lifts.
+        // A finger on the charging screen sends it away, and the lock screen
+        // it was lit over is what it leaves, as on the phone's own system.
         if self.charge_shown() {
             if matches!(ev, Touch::Down(..)) {
                 self.dismiss_charging(now);
                 self.drag = Drag::Waking;
             }
             return Vec::new();
+        }
+        // The lock screen stands between a finger and the page under it.
+        if self.locked {
+            return self.lock_touch(ev, now);
         }
         // A finger landing just after the panel lit only keeps it awake.
         if matches!(ev, Touch::Down(..)) && self.just_woke(now) {
@@ -6468,6 +6870,13 @@ impl App {
         // page, and does nothing else.
         if key != Key::Power && self.charge_shown() {
             self.dismiss_charging(now);
+            self.button = Some((key, Press::Spent));
+            return fx;
+        }
+        // The lock screen stands between the keys and the page as it does
+        // between a finger and it: a button other than power presses nothing
+        // under it, and power only turns the panel off again.
+        if self.locked && key != Key::Power {
             self.button = Some((key, Press::Spent));
             return fx;
         }
@@ -7943,10 +8352,10 @@ mod tests {
         let t = Theme::light(W, H, PPD);
         let mut app = App::new(Screen::Settings, W, H, PPD);
         let mut c = Canvas::new(W, H);
-        let row = app.frame(&f, &i).hits.iter().find(|h| h.action == Action::Toggle(Switch::Vibrate)).expect("on the settings page").rect;
+        let row = app.frame(&f, &i).hits.iter().find(|h| h.action == Action::Toggle(Switch::Aod)).expect("on the settings page").rect;
         let (x, y) = (W as f32 * 0.6, row.y + row.h / 2.0);
-        tap_at(&mut app, &f, &i, Action::Toggle(Switch::Vibrate), 1000);
-        assert!(!app.state.vibrate, "the tap worked the switch");
+        tap_at(&mut app, &f, &i, Action::Toggle(Switch::Aod), 1000);
+        assert!(!app.state.aod, "the tap worked the switch");
         app.compose(&mut c, &f, &i, "12:00", 1040);
         let held = grey_at(&c, x, y);
         assert!(held < t.pal.card.r, "held from the lift: {held}");
@@ -8248,13 +8657,13 @@ mod tests {
     fn dragging_scrolls_and_does_not_tap() {
         let (f, i) = (fonts(), info());
         let mut app = App::new(Screen::Settings, W, H, PPD);
-        let (x, y) = spot(&mut app, &f, &i, Action::Toggle(Switch::Vibrate));
+        let (x, y) = spot(&mut app, &f, &i, Action::Toggle(Switch::Aod));
         assert!(y < H as f32, "the switch is on the first screen");
         app.touch(Touch::Down(x, y), &f, 0);
         app.touch(Touch::Move(x, y - 100.0), &f, 0);
         app.touch(Touch::Move(x, y - 300.0), &f, 0);
         app.touch(Touch::Up, &f, 0);
-        assert!(app.state.vibrate, "the switch was not flipped");
+        assert!(app.state.aod, "the switch was not flipped");
         assert_eq!(app.top().1, 300.0);
     }
 
@@ -8389,16 +8798,18 @@ mod tests {
         let mut app = App::new(Screen::Settings, W, H, PPD);
         app.frame(&f, &i);
         let lift = flick(&mut app, &f, 1000, 20.0);
-        app.tick(lift + 30);
+        // The switch is looked for where the page has glided to by the time
+        // the finger lands, which is where the finger finds it.
+        app.tick(lift + 40);
         assert!(app.fling.is_some(), "the page is gliding");
         let held = app.top().1;
-        let (x, y) = spot(&mut app, &f, &i, Action::Toggle(Switch::Vibrate));
+        let (x, y) = spot(&mut app, &f, &i, Action::Toggle(Switch::Lock));
         assert!(y > 0.0 && y < H as f32, "the switch is on screen");
         app.touch(Touch::Down(x, y), &f, lift + 40);
         app.tick(lift + 500);
         assert_eq!(app.top().1, held, "the page stopped under the finger");
         app.touch(Touch::Up, &f, lift + 520);
-        assert!(app.state.vibrate, "the switch was not flipped");
+        assert!(app.state.lock, "the switch was not flipped");
         assert!(app.fling.is_none());
     }
 
@@ -9197,6 +9608,7 @@ mod tests {
     fn erasing_goes_part_by_part_and_offers_a_way_out_once_it_stops() {
         let (f, i) = (fonts(), info());
         let mut app = App::new(Screen::CantStart, W, H, PPD);
+        app.state.lock = false;
         app.erase_started(true, true, vec![Part::Data, Part::Metadata]);
         assert_eq!(app.screen(), Screen::Erase);
         assert!(app.frame(&f, &i).hits.is_empty(), "nothing is to be done while erasing");
@@ -9267,6 +9679,7 @@ mod tests {
     fn erasing_the_user_chose_tells_its_progress_and_waits_for_them_at_the_end() {
         let (f, i) = (fonts(), info());
         let mut app = App::new(Screen::Home, W, H, PPD);
+        app.state.lock = false;
         app.erase_started(false, false, vec![Part::Media, Part::Art]);
         app.erase_progress(30, 120);
         assert_eq!(app.state.erase.progress, Some((30, 120)));
@@ -11569,13 +11982,116 @@ mod tests {
         assert_eq!(app.deadline(DIMS + 800), Some(DIMS + 650 + DIMS), "the wait starts over");
     }
 
+    /// The keypad the lock screen draws, and where each of its keys is.
+    fn lock_keys(app: &App) -> Vec<(Rect, Cap)> {
+        let t = app.theme();
+        let top = t.m.h as f32 - widgets::keypad_height(&t);
+        widgets::keypad_rects(&t, top)
+    }
+
+    #[test]
+    fn a_panel_that_goes_off_locks_and_the_slide_up_opens_it() {
+        let (f, i) = (fonts(), info());
+        let mut app = App::new(Screen::Home, W, H, PPD);
+        let (x, y) = spot(&mut app, &f, &i, Action::Open(Screen::Settings));
+        press(&mut app, Key::Power, 0);
+        assert!(!app.display_on(), "the power key put it out");
+        assert!(app.locked(), "and it went off locked");
+        // The finger that lights it lands on the lock screen, not the page.
+        app.touch(Touch::Down(x, y), &f, 100);
+        app.touch(Touch::Up, &f, 160);
+        assert!(app.display_on(), "the touch lit the panel");
+        assert_eq!(app.screen(), Screen::Home, "and pressed nothing under the lock");
+        assert!(app.locked(), "a tap alone does not open it");
+        // A pull short of the slide leaves it shut, a longer one opens it.
+        app.touch(Touch::Down(x, 2000.0), &f, 400);
+        app.touch(Touch::Move(x, 1600.0), &f, 420);
+        app.touch(Touch::Up, &f, 440);
+        assert!(app.locked(), "0.5 of the slide is not the slide");
+        app.touch(Touch::Down(x, 2000.0), &f, 500);
+        app.touch(Touch::Move(x, 1500.0), &f, 520);
+        app.touch(Touch::Up, &f, 540);
+        assert!(!app.locked(), "the slide opened it");
+        tap_at(&mut app, &f, &i, Action::Open(Screen::Settings), 900);
+        assert_eq!(app.screen(), Screen::Settings, "and the page takes the finger again");
+    }
+
+    #[test]
+    fn a_code_set_is_what_opens_the_lock_screen() {
+        let f = fonts();
+        let mut app = App::new(Screen::Home, W, H, PPD);
+        // What the runtime keeps: the lock screen only asks whether it is
+        // there, and hands the digits to be checked.
+        app.state.lock_code = "s1$4$00112233445566778899aabbccddeeff$".to_string() + &"ab".repeat(32);
+        app.lock_now(0);
+        // The slide is not the way in once a code is set: the keypad is
+        // all there is to touch, and above it a pull does nothing.
+        app.touch(Touch::Down(700.0, 900.0), &f, 100);
+        app.touch(Touch::Move(700.0, 200.0), &f, 120);
+        app.touch(Touch::Up, &f, 140);
+        assert!(app.locked(), "the slide alone opens nothing");
+        let keys = lock_keys(&app);
+        let key = |cap: Cap| keys.iter().find(|(_, c)| *c == cap).expect("on the keypad").0.centre();
+        let mut at = 200;
+        for digit in ['5', '1', '3', '9'] {
+            let (x, y) = key(Cap::Char(digit));
+            app.touch(Touch::Down(x, y), &f, at);
+            app.touch(Touch::Up, &f, at + 60);
+            at += 120;
+        }
+        let (x, y) = key(Cap::Enter);
+        app.touch(Touch::Down(x, y), &f, at);
+        assert_eq!(
+            app.touch(Touch::Up, &f, at + 60),
+            vec![Effect::CheckCode { recorded: app.state.lock_code.clone(), typed: "5139".into() }],
+            "the digits go to be checked"
+        );
+        // Wrong: what was typed is cleared and the panel says so for a while.
+        app.code_checked(false, at + 200);
+        assert!(app.locked(), "a wrong code opens nothing");
+        let wrong_at = at + 200 + LOCK_WRONG_MS;
+        assert_eq!(app.deadline(at + 300), Some(wrong_at), "the message has its time");
+        // Right: the page under it is the page again.
+        app.code_checked(true, wrong_at + 100);
+        assert!(!app.locked(), "the right code opened it");
+    }
+
+    #[test]
+    fn the_lock_screen_stands_between_the_keys_and_the_page() {
+        let mut app = App::new(Screen::Reboot, W, H, PPD);
+        app.lock_now(0);
+        assert!(app.key(Key::Back, 100).is_empty());
+        assert_eq!(app.screen(), Screen::Reboot, "back did nothing under the lock");
+        // The power key still puts the panel out, and it comes back locked.
+        press(&mut app, Key::Power, 300);
+        assert!(!app.display_on());
+        press(&mut app, Key::Power, 400);
+        assert!(app.display_on() && app.locked());
+    }
+
+    #[test]
+    fn a_panel_whose_keys_work_the_page_does_not_lock() {
+        let (f, i) = (fonts(), info());
+        let mut app = App::new(Screen::Home, W, H, PPD);
+        app.frame(&f, &i);
+        // No touchscreen to slide with: a lock would put the page out of
+        // reach for good.
+        app.touchscreen_missing();
+        app.tick(0);
+        app.tick(OFF);
+        assert!(!app.display_on(), "the panel went off by itself");
+        assert!(!app.locked(), "there is no finger to make the slide with");
+    }
+
     #[test]
     fn a_touch_on_the_dark_panel_lights_nothing() {
         let (f, i) = (fonts(), info());
         let mut app = App::new(Screen::Home, W, H, PPD);
         // Without the always-on clock, which is the case a finger on the
-        // dark panel has to leave alone.
+        // dark panel has to leave alone. The lock screen that a panel going
+        // off puts up is another test's; here the page is reached at once.
         app.state.aod = false;
+        app.state.lock = false;
         let (x, y) = spot(&mut app, &f, &i, Action::Open(Screen::Settings));
         press(&mut app, Key::Power, 0);
         assert!(app.touch(Touch::Down(x, y), &f, 100).is_empty());
@@ -11653,6 +12169,7 @@ mod tests {
     fn a_touch_or_a_volume_key_sends_the_charging_screen_away_and_keeps_the_panel_lit() {
         let (f, i) = (fonts(), info());
         let mut app = App::new(Screen::Home, W, H, PPD);
+        app.state.lock = false;
         let (x, y) = spot(&mut app, &f, &i, Action::Open(Screen::Settings));
         app.tick(0);
         press(&mut app, Key::Power, 0);
@@ -11773,6 +12290,7 @@ mod tests {
     fn a_stray_touch_just_after_an_install_lights_the_panel_presses_nothing() {
         let (f, i) = (fonts(), info());
         let mut app = sideloading(&f, &i);
+        app.state.lock = false;
         press(&mut app, Key::Power, 0);
         app.install(Event::Finished(Outcome::Installed { slot: Slot::A, wipe: false }), 100);
         assert!(app.display_on(), "the finished install lit the panel");

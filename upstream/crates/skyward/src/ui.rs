@@ -1,5 +1,6 @@
 use crate::backup;
 use crate::decrypt::{self, Decryptor};
+use crate::pin;
 use crate::filework;
 use crate::haptics::Haptics;
 use crate::relabel;
@@ -1099,6 +1100,8 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
     // Opening the data partition, or a user's own files in it, under way,
     // and the users whose own files are still closed once it is open.
     let mut decryptor: Option<Decryptor> = None;
+    // The lock screen's code being kept or checked, off this thread.
+    let mut pin_work: Option<pin::Worker> = None;
     let mut closed: Vec<Closed> = Vec::new();
     let mut arriving = Some(Incoming::Arrived);
     // The mount page shows the partitions as they are when it opens and
@@ -1559,6 +1562,9 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
         }
         if let Some(d) = &decryptor {
             fds.push(d.fd());
+        }
+        if let Some(p) = &pin_work {
+            fds.push(p.fd());
         }
         if let Some(p) = &part_worker {
             fds.push(p.fd());
@@ -2027,6 +2033,13 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
         if updated {
             skyward_updater = None;
         }
+        if let Some(done) = pin_work.as_ref().and_then(pin::Worker::ended) {
+            pin_work = None;
+            match done {
+                pin::Done::Saved(hashed) => app.code_saved(hashed, now),
+                pin::Done::Checked(right) => app.code_checked(right, now),
+            }
+        }
         if let Some(ended) = decryptor.as_ref().and_then(Decryptor::ended) {
             decryptor = None;
             match ended {
@@ -2302,6 +2315,16 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                         ensure!(decryptor.is_none(), "the data partition is being opened already");
                         let job = decrypt::Job::Unlock { closed: closed.clone(), user, credential: code.into_bytes() };
                         decryptor = Some(Decryptor::start(job)?);
+                    }
+                    // The lock screen's code is kept and checked on a thread
+                    // of its own: stretching it takes longer than a frame.
+                    Effect::SaveCode(code) => {
+                        ensure!(pin_work.is_none(), "the code is being worked on already");
+                        pin_work = Some(pin::Worker::save(code)?);
+                    }
+                    Effect::CheckCode { recorded, typed } => {
+                        ensure!(pin_work.is_none(), "the code is being worked on already");
+                        pin_work = Some(pin::Worker::check(recorded, typed)?);
                     }
                     Effect::ReadDir(folder) => list(&mut app, folder)?,
                     Effect::ReadPlace(place, folder) => list_place(&mut app, place, folder)?,

@@ -1,8 +1,8 @@
 # 对上游源码的改动
 
 本移植**不修改** Skyward 的架构与逻辑，绝大多数差异都在配置（`devices/nuwa.toml`）。
-源码层面只有四类改动：为了在 Windows 上构建的两处可移植性补丁、两个新功能
-（息屏显示、大写锁定）、版本号拆分，以及署名。下面逐条列出，便于对照上游 diff。
+源码层面只有四类改动：为了在 Windows 上构建的两处可移植性补丁、三个新功能
+（息屏显示、锁屏、大写锁定）、版本号拆分，以及署名。下面逐条列出，便于对照上游 diff。
 
 ## 一、可移植性补丁（两处）
 
@@ -39,7 +39,8 @@ pub fn unpack(...) -> Result<...> { ... }
 
 ## 二、新功能（`crates/skyward-ui`）
 
-这两项是真正的功能改动，全部在 UI crate 内，不触碰 drivers、安装、加密等逻辑。
+这三项是真正的功能改动，全部在 UI crate 内（锁屏的密码哈希在 `skyward-crypto`），
+不触碰 drivers、安装、加密等逻辑。
 
 ### 息屏显示（AOD）
 
@@ -72,12 +73,33 @@ Shifted                     -> Letters     （单击取消一次性大写）
 
 输入字符时清空 `shift_at`；只有 `Shifted` 会在输入后回落到 `Letters`，`Locked` 保持不变。
 
+### 锁屏
+
+面板熄灭即上锁，再亮起来先看到锁屏；默认上滑解锁，可在设置里另设 4–8 位数字密码。
+
+| 文件 | 改动 |
+|---|---|
+| `skyward-crypto/src/pin.rs` | 新增：`allowed()`（4–8 位纯数字）、`hash()`（scrypt N=2^13/r=8/p=1，16 字节 `/dev/urandom` 盐，输出 `s1$<位数>$<盐>$<哈希>`）、`check()`（常量时间比较）、`length()`、`read()`（一行只有一个解析器，`length` 由它派生，避免两处格式判断走偏） |
+| `skyward/src/pin.rs` | 新增：`Worker`，把拉伸放到后台线程，`pipe2(O_CLOEXEC\|O_NONBLOCK)` 唤醒主循环，`Done::{Saved,Checked}` 回传（与 `Decryptor` 同一个范式） |
+| `skyward-ui/src/app.rs` | `State.lock`/`lock_code`/`code_entry`；`Switch::Lock`、`Action::ForgetCode`、`Screen::SetCode`、`Effect::SaveCode`/`CheckCode`；`App.locked`/`pulled`/`lock_from`/`lock_pressed`/`lock_typed`/`lock_wrong`；`LOCK_SLID`(0.6)、`LOCK_PULL_DP`(220)、`LOCK_WRONG_MS`(4000)；`sleep()` 上锁（按键模式下跳过）、`touch()` 与 `key()` 在锁屏处收口、`lock_touch()`/`lock_key()`/`code_typed()`/`unlock_panel()`/`code_saved()`/`code_checked()`/`forget_code()`；`compose_lock()` 及其两套版式；`deadline()` 加错误提示到期 |
+| `skyward-ui/src/widgets.rs` | `keypad()` 的确认键文字改为入参（原来的「解密」写死），并拆出只算不画的 `keypad_rects()` 供锁屏命中；新增 `code_dots()` |
+| `skyward-ui/src/pages.rs` | 新页 `set_code()`（两步输入）；设置页「亮度」段之下新增「锁屏」段（开关 + 解锁密码行） |
+| `skyward-ui/src/settings.rs` | `Settings.lock`/`lock_code` 的读写 |
+
+几处刻意的决定：
+
+- **上锁只看 `sleep()`**，开机不上锁——开机进来手就在机上，不必先滑一下。
+- **按键也走锁屏**：除电源键外，锁屏期间任何按键都不透传到页面（否则 `返回` 会翻页）。
+- **充电屏画在锁屏之上**：插线先看到充电动画，划走才落到锁屏。
+- **`App::new(Screen::SetCode)` 也建 `code_entry`**：构造一个以设密码页开场的
+  `App`（预览与测试会这么做）时，它没经过 `open()`，入口是 `None` 的话键盘输入会静默丢弃。
+
 ## 三、版本号（`crates/skyward-info`）
 
 ```rust
 pub const UPSTREAM: &str = env!("CARGO_PKG_VERSION");   // 0.2.0，更新检查用这个
-pub const PORT: &str = "0.2.1";                         // 本移植的第几版
-pub const VERSION: &str = concat!("SW-v", env!("CARGO_PKG_VERSION"), "-nuwa-v0.2.1");
+pub const PORT: &str = "0.2.2";                         // 本移植的第几版
+pub const VERSION: &str = concat!("SW-v", env!("CARGO_PKG_VERSION"), "-nuwa-v0.2.2");
 ```
 
 `VERSION` 只用于展示（About 页、MTP 设备名、内核日志）；`crates/skyward/src/updates.rs`

@@ -137,7 +137,8 @@ fn main() -> Result<()> {
     // The always-on clock on its own, as the panel shows it once the screen
     // has gone off: a look at it without a phone, from the device's own
     // config and font where they are named.
-    if args.get(2).map(String::as_str) == Some("--aod") {
+    let looking = args.get(2).map(String::as_str);
+    if matches!(looking, Some("--aod" | "--lock")) {
         let near = |flag: &str| args.iter().position(|a| a == flag).and_then(|k| args.get(k + 1)).cloned();
         let config = near("--config")
             .map(PathBuf::from)
@@ -151,6 +152,15 @@ fn main() -> Result<()> {
         let fonts = Fonts::load(&font, 0, mono)?;
         eprintln!("font: {}", font.display());
         let (w, h) = (cfg.display.width, cfg.display.height);
+        if looking == Some("--lock") {
+            let locks = [("lock-slide.png", 91_000u64, false, false), ("lock-code.png", 91_000, true, false), ("lock-code-wrong.png", 94_000, true, true)];
+            for (name, now, coded, wrong) in locks {
+                let path = out.join(name);
+                write_png(&path, &lock(&fonts, &cfg, w, h, "08:14", now, coded, wrong))?;
+                println!("wrote {}", path.display());
+            }
+            return Ok(());
+        }
         for (clock, now, name) in [("08:14", 91_000u64, "aod.png"), ("08:15", 99_000, "aod-hint-gone.png")] {
             let path = out.join(name);
             write_png(&path, &aod(&fonts, &cfg, w, h, clock, now))?;
@@ -1054,7 +1064,17 @@ fn main() -> Result<()> {
     }
 
     // The panel mid-gesture, to set beside recordings of the same moves.
-    let moments: [Moment; 27] = [
+    let moments: [Moment; 29] = [
+        // A code given four digits, and the page asking for it again with
+        // two of the second telling typed.
+        ("07-set-code", Screen::SetCode, false, &|app, f| {
+            type_keys(app, f, &info, &[Cap::Char('5'), Cap::Char('1'), Cap::Char('3'), Cap::Char('9')], 200)
+        }),
+        ("07b-set-code-again", Screen::SetCode, false, &|app, f| {
+            let at = type_keys(app, f, &info, &[Cap::Char('5'), Cap::Char('1'), Cap::Char('3'), Cap::Char('9')], 200);
+            let at = type_keys(app, f, &info, &[Cap::Enter], at + 200);
+            type_keys(app, f, &info, &[Cap::Char('5'), Cap::Char('1')], at + 200)
+        }),
         ("08-about-light", Screen::About, false, &|_, _| 2000),
         ("08-about-dark", Screen::About, true, &|_, _| 2000),
         ("08-about-light-later", Screen::About, false, &|_, _| 9000),
@@ -1555,6 +1575,46 @@ fn aod(f: &Fonts, cfg: &DeviceConfig, w: u32, h: u32, clock: &str, now: u64) -> 
     app.set_day(fmt::aod_date(lang(), 1_794_000_000, 0));
     app.tick(90_000);
     app.tick(now);
+    let info = nezha(cfg);
+    let mut c = Canvas::new(w, h);
+    app.compose(&mut c, f, &info, clock, now);
+    c
+}
+
+/// The lock screen, as the panel shows it after going off with the lock
+/// on: the slide that opens it, or the keypad the code is typed on, the
+/// last with a code just turned down.
+fn lock(f: &Fonts, cfg: &DeviceConfig, w: u32, h: u32, clock: &str, now: u64, coded: bool, wrong: bool) -> Canvas {
+    let mut app = App::new(Screen::Home, w, h, cfg.display.density as f32 / 160.0);
+    app.state.lang = lang();
+    app.state.aod = true;
+    app.state.screen_off = 1;
+    app.tick(0);
+    app.set_day(fmt::aod_date(lang(), 1_794_000_000, 0));
+    app.tick(90_000);
+    if coded {
+        // A line of the shape the code page writes; what it holds is not
+        // asked for here.
+        app.state.lock_code = "s1$6$00112233445566778899aabbccddeeff$e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_string();
+    }
+    app.state.lock = true;
+    app.lock_now(now);
+    // A finger on the dark panel lights it and leaves the lock screen up,
+    // which is how it is met.
+    app.touch(Touch::Down(w as f32 / 2.0, h as f32 * 0.75), f, now);
+    app.touch(Touch::Up, f, now);
+    // The curtain takes a moment to come up; the frame shown is the one
+    // after it has.
+    let now = now + 400;
+    app.tick(now);
+    if coded {
+        for ch in "5139".chars() {
+            app.lock_key(Cap::Char(ch));
+        }
+    }
+    if wrong {
+        app.code_checked(false, now);
+    }
     let info = nezha(cfg);
     let mut c = Canvas::new(w, h);
     app.compose(&mut c, f, &info, clock, now);

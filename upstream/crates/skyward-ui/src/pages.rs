@@ -97,6 +97,7 @@ pub fn render(screen: Screen, cx: &Ctx) -> Frame {
         Screen::License => license(cx),
         Screen::FontLicense => font_license(cx),
         Screen::Slot => slot(cx),
+        Screen::SetCode => set_code(cx),
         Screen::Systems => systems(cx),
         Screen::Fastboot => fastboot(cx),
         Screen::Erase => erase(cx),
@@ -167,6 +168,10 @@ const SPECS: Text = ["全部参数与信息", "全部規格與資訊", "All spec
 const LOGS: Text = ["导出日志", "匯出記錄", "Export logs"];
 const SCREEN_TIMEOUT: Text = ["息屏时间", "螢幕自動關閉", "Screen timeout"];
 const AOD: Text = ["息屏显示", "息屏顯示", "Always-on display"];
+const LOCK: Text = ["锁屏", "鎖屏", "Lock screen"];
+const LOCK_CODE: Text = ["解锁密码", "解鎖密碼", "Unlock code"];
+const CODE_NONE: Text = ["未设置，上滑解锁", "未設定，上滑解鎖", "Not set, swipe to unlock"];
+const CODE_SET: Text = ["已设置", "已設定", "Set"];
 const UPDATE: Text = ["系统更新", "系統更新", "System update"];
 const SKYWARD_UPDATE: Text = ["Skyward 更新", "Skyward 更新", "Skyward update"];
 const FILES: Text = ["文件管理", "檔案管理", "File manager"];
@@ -374,7 +379,20 @@ pub fn settings(cx: &Ctx) -> Frame {
         &[Row::new(l.pick(AOD)).icon(PURPLE, Icon::Clock).trail(Trail::Switch(s.aod))],
     );
     out.extend(hits(&aod.rows, &[Action::Toggle(Switch::Aod)]));
-    y = widgets::section(&mut c, t, f, aod.bottom, l.pick(["振动", "震動", "Vibration"]));
+    // The lock the panel takes when it goes off, and the code that opens it
+    // where one is set.
+    let mut lock_y = widgets::section(&mut c, t, f, aod.bottom, l.pick(["锁屏", "鎖屏", "Lock screen"]));
+    let mut lock_rows = vec![Row::new(l.pick(LOCK)).icon(SLATE, Icon::Lock).trail(Trail::Switch(s.lock))];
+    let mut lock_ops = vec![Action::Toggle(Switch::Lock)];
+    if s.lock {
+        let code = if s.lock_code.is_empty() { l.pick(CODE_NONE) } else { l.pick(CODE_SET) };
+        lock_rows.push(Row::new(l.pick(LOCK_CODE)).icon(PURPLE, Icon::Shield).trail(Trail::Value(code)));
+        lock_ops.push(Action::Open(Screen::SetCode));
+    }
+    let locks = widgets::list(&mut c, t, f, lock_y, &lock_rows);
+    out.extend(hits(&locks.rows, &lock_ops));
+    lock_y = locks.bottom;
+    y = widgets::section(&mut c, t, f, lock_y, l.pick(["振动", "震動", "Vibration"]));
     let below = Row::new(l.pick(["触摸振动", "觸控震動", "Touch vibration"])).trail(Trail::Switch(s.vibrate));
     let vibration = widgets::slider_card(&mut c, t, f, y, Caption::Vibrate, l.pick(["振动强度", "震動強度", "Vibration intensity"]), s.vibration, Some(below));
     out.push(Hit { rect: vibration.track, action: Action::Slider(Slider::Vibration) });
@@ -804,7 +822,7 @@ fn code(cx: &Ctx, mut c: Canvas, user: u32, keys: Keys, checking: bool) -> Frame
         }
         Keys::Digits => {
             let top = m.h as f32 - widgets::keypad_height(t);
-            let caps = widgets::keypad(&mut c, t, f, l, top, s.key_held());
+            let caps = widgets::keypad(&mut c, t, f, l, top, s.key_held(), l.pick(["解密", "解密", "Decrypt"]));
             if !checking {
                 out.extend(caps.into_iter().map(|(rect, cap)| Hit { rect, action: Action::Type(cap) }));
             }
@@ -824,6 +842,64 @@ fn code(cx: &Ctx, mut c: Canvas, user: u32, keys: Keys, checking: bool) -> Frame
 
 /// What a slot is shown as where the boot control could not be read.
 const UNREADABLE: Text = ["无法读取", "無法讀取", "Unreadable"];
+
+/// The code the recovery's own lock screen is opened with: what it is for,
+/// the dots of what has been typed, and the keypad it is typed on.
+pub fn set_code(cx: &Ctx) -> Frame {
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    let m = &t.m;
+    let x = m.w as f32 / 2.0;
+    let mut c = page(cx);
+    let mut out = Vec::new();
+    let entry = s.code_entry.as_ref();
+    let again = entry.is_some_and(|e| e.first.is_some());
+    let typed = entry.map_or(0, |e| e.typed.chars().count());
+    // The keypad holds the foot of the page, so the words are set in the
+    // room above it rather than against the bar: a little under half way
+    // down, where the eye lands between the two.
+    let bottom = m.h as f32 - widgets::keypad_height(t);
+    let heading = l.pick(if again { CODE_AGAIN } else { CODE_FIRST });
+    let y0 = m.content_top + (bottom - m.content_top) * 0.40;
+    c.text_center(&f.heading, heading, x, y0, m.dp(24.0), t.pal.text);
+    let mut y = y0 + m.dp(38.0);
+    for line in l.pick(if again { CODE_AGAIN_HINT } else { CODE_HINT }).split('\n') {
+        c.text_center(&f.body, line, x, y, m.sub_px, t.pal.subtitle);
+        y += m.dp(22.0);
+    }
+    if let Some(error) = entry.and_then(|e| e.error) {
+        c.text_center(&f.body, error, x, y + m.dp(10.0), m.sub_px, Rgba::rgb(0xE0, 0x5A, 0x4E));
+    }
+    // A code already kept can be let go of here.
+    if !s.lock_code.is_empty() {
+        let forget = l.pick(CODE_FORGET);
+        let (wx, wy) = (x, y + m.dp(44.0));
+        let w = c.text_width(&f.body, forget, m.sub_px);
+        c.text(&f.body, forget, wx - w / 2.0, wy, m.sub_px, t.pal.accent, None);
+        out.push(Hit { rect: Rect::new(wx - w / 2.0 - m.dp(16.0), wy - m.dp(22.0), w + m.dp(32.0), m.dp(44.0)), action: Action::ForgetCode });
+    }
+    widgets::code_dots(&mut c, t, x, bottom - m.dp(56.0), typed);
+    let enter = l.pick(if again { ["保存", "儲存", "Save"] } else { ["下一步", "下一步", "Next"] });
+    let caps = widgets::keypad(&mut c, t, f, l, bottom, s.key_held(), enter);
+    out.extend(caps.into_iter().map(|(rect, cap)| Hit { rect, action: Action::Type(cap) }));
+    // The page's own title stands in the bar alone, as the decrypt page's
+    // does: this page puts its own words where it wants them.
+    Frame { header: false, ..Frame::new(t, c, out, l.pick(SET_CODE), 0.0) }
+}
+
+const SET_CODE: Text = ["解锁密码", "解鎖密碼", "Unlock code"];
+const CODE_FIRST: Text = ["输入解锁密码", "輸入解鎖密碼", "Enter an unlock code"];
+const CODE_AGAIN: Text = ["再次输入", "再次輸入", "Enter it again"];
+const CODE_AGAIN_HINT: Text = [
+    "再打一遍刚才那几位数字，\n两遍一样才算设好。",
+    "再打一遍剛才那幾位數字，\n兩遍一樣才算設好。",
+    "Type those digits once more:\nthe two tellings must match.",
+];
+const CODE_FORGET: Text = ["取消解锁密码", "取消解鎖密碼", "Remove the code"];
+const CODE_HINT: Text = [
+    "4 至 8 位数字，用来打开 Skyward 自己的锁屏，\n与手机的锁屏密码无关。",
+    "4 至 8 位數字，用來開啟 Skyward 自己的鎖屏，\n與手機的螢幕鎖定密碼無關。",
+    "4 to 8 digits, for Skyward's own lock screen,\nnot the phone's screen lock.",
+];
 
 /// Reboot target picker with a swipe-to-confirm control.
 pub fn reboot(cx: &Ctx) -> Frame {
@@ -3562,11 +3638,11 @@ const NOTICE: Text = ["声明", "聲明", "Notice"];
 
 const MODIFIED_NOTE: Text = [
     "本移植基于 Skyward 0.2.0，为小米 13 Pro（nuwa）修改。修改部分 Copyright (C) 2026 Lin Zixi。\n\n\
-改动：补充 nuwa 所需的 TEE 服务链，使 /data 可以解密；新增息屏显示；屏幕键盘支持双击锁定大写。完整记录见项目仓库的 CHANGELOG 与 docs/PATCHES.md。",
+改动：补充 nuwa 所需的 TEE 服务链，使 /data 可以解密；新增息屏显示；屏幕键盘支持双击锁定大写；新增熄屏后的锁屏（上滑解锁，可另设数字密码）。完整记录见项目仓库的 CHANGELOG 与 docs/PATCHES.md。",
     "本移植基於 Skyward 0.2.0，為小米 13 Pro（nuwa）修改。修改部分 Copyright (C) 2026 Lin Zixi。\n\n\
-改動：補充 nuwa 所需的 TEE 服務鏈，使 /data 可以解密；新增息屏顯示；螢幕鍵盤支援雙擊鎖定大寫。完整記錄見專案倉庫的 CHANGELOG 與 docs/PATCHES.md。",
+改動：補充 nuwa 所需的 TEE 服務鏈，使 /data 可以解密；新增息屏顯示；螢幕鍵盤支援雙擊鎖定大寫；新增熄屏後的鎖屏（上滑解鎖，可另設數字密碼）。完整記錄見專案倉庫的 CHANGELOG 與 docs/PATCHES.md。",
     "This port is a modified version of Skyward 0.2.0 for the Xiaomi 13 Pro (nuwa). Modifications Copyright (C) 2026 Lin Zixi.\n\n\
-The changes: the TEE service chain nuwa needs for /data to decrypt, an always-on clock, and caps lock on the on-screen keyboard. The full record is in the project's CHANGELOG and docs/PATCHES.md.",
+The changes: the TEE service chain nuwa needs for /data to decrypt, an always-on clock, caps lock on the on-screen keyboard, and a lock screen the panel takes when it goes off (a slide to open, or a code of its own). The full record is in the project's CHANGELOG and docs/PATCHES.md.",
 ];
 
 /// Skyward's own licence.
