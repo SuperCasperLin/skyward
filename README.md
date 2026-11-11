@@ -27,6 +27,7 @@ recovery 变成**原生支持 data 解密**的 Skyward。
 | 移植 | Lin Zixi |
 | 许可 | GPL-3.0（与上游一致） |
 | 更新日志 | [CHANGELOG.md](CHANGELOG.md) |
+| 新机型适配 | [docs/PORTING.md](docs/PORTING.md)（交接文档：改动清单、配置采集、验收步骤） |
 
 ## 这是什么
 
