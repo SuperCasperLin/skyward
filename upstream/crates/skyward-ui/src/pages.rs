@@ -556,7 +556,7 @@ const AUTHOR: &str = "© 2026 Kirk Lin";
 /// form. GPL-3 keeps the original notice in place, so this one is added
 /// below it rather than over it; what the port changed is spelled out on
 /// the licence page.
-const PORT: &str = "© 2026 Lin Zixi";
+const PORT: &str = "© 2026 Casper Lin";
 
 /// About this device, modelled on the stock「我的设备」: the wordmark, the
 /// version and its author over a moving colour field, and the summary,
@@ -3687,11 +3687,11 @@ const MODIFIED: Text = ["修改说明", "修改說明", "Changes"];
 const NOTICE: Text = ["声明", "聲明", "Notice"];
 
 const MODIFIED_NOTE: Text = [
-    "本移植基于 Skyward 0.2.0，为小米 13 Pro（nuwa）修改。修改部分 Copyright (C) 2026 Lin Zixi。\n\n\
+    "本移植基于 Skyward 0.2.0，为小米 13 Pro（nuwa）修改。修改部分 Copyright (C) 2026 Casper Lin。\n\n\
 改动：补充 nuwa 所需的 TEE 服务链，使 /data 可以解密；新增息屏显示；屏幕键盘支持双击锁定大写；新增熄屏后的锁屏（上滑解锁，可另设数字密码）。完整记录见项目仓库的 CHANGELOG 与 docs/PATCHES.md。",
-    "本移植基於 Skyward 0.2.0，為小米 13 Pro（nuwa）修改。修改部分 Copyright (C) 2026 Lin Zixi。\n\n\
+    "本移植基於 Skyward 0.2.0，為小米 13 Pro（nuwa）修改。修改部分 Copyright (C) 2026 Casper Lin。\n\n\
 改動：補充 nuwa 所需的 TEE 服務鏈，使 /data 可以解密；新增息屏顯示；螢幕鍵盤支援雙擊鎖定大寫；新增熄屏後的鎖屏（上滑解鎖，可另設數字密碼）。完整記錄見專案倉庫的 CHANGELOG 與 docs/PATCHES.md。",
-    "This port is a modified version of Skyward 0.2.0 for the Xiaomi 13 Pro (nuwa). Modifications Copyright (C) 2026 Lin Zixi.\n\n\
+    "This port is a modified version of Skyward 0.2.0 for the Xiaomi 13 Pro (nuwa). Modifications Copyright (C) 2026 Casper Lin.\n\n\
 The changes: the TEE service chain nuwa needs for /data to decrypt, an always-on clock, caps lock on the on-screen keyboard, and a lock screen the panel takes when it goes off (a slide to open, or a code of its own). The full record is in the project's CHANGELOG and docs/PATCHES.md.",
 ];
 

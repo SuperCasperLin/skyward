@@ -190,6 +190,14 @@ probe = "http://connect.rom.miui.com/generate_204"
 # The update server the stock updater of the Chinese system asks.
 [update]
 server = "https://update.miui.com/updates/miotaV3.php"
+# 本移植自己的发行仓库。留空表示还没有部署：在线更新会
+# 直接回答「已是最新」且不联网，绝不回退到上游官方 kirklin/skyward 的 release
+# （那些镜像不是我们这个移植，刷进去会丢掉全部定制）。部署到 GitHub 后填这里，
+# 只需重新打包镜像，不必改代码。
+repo = "SuperCasperLin/skyward"
+# 纯 semver 发行序号，只用于在线更新比较。第一次发布打 v1.0.0，之后每次
+# 适配上游新基线或发新版递增（v1.1.0 ...）。About 页仍显示 SW-v...-nuwa-v...
+release = "1.0.0"
 
 # The stock build the recovery is made on: the Chinese system's
 # OS3.0.312.0, whose full update package on the phone maker's own download

@@ -164,11 +164,25 @@ pub struct Firmware {
 }
 
 /// The phone maker's update server, which the stock updater asks about the
-/// installed system.
+/// installed system; and, where this build has a release channel of its own,
+/// where its own newer images are published.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Update {
     /// Where the questions are sent.
     pub server: String,
+    /// The GitHub repository this port takes its own updates from, as
+    /// `owner/name`. An empty one means the build has no release channel:
+    /// the update check then answers that the build is current without
+    /// asking anyone, instead of falling back to the upstream project's
+    /// releases, which are not this port's images.
+    #[serde(default)]
+    pub repo: String,
+    /// This port's release number, a plain semver version compared with the
+    /// tag of the newest release in `repo`. The composite version shown on
+    /// the About page names the upstream baseline and the port revision and
+    /// is not a semver version, so it cannot be used for this comparison.
+    #[serde(default)]
+    pub release: String,
 }
 
 /// What a backup takes in and leaves out beyond what every Android phone

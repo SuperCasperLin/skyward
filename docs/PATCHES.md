@@ -275,7 +275,7 @@ pub const VERSION: &str = concat!("SW-v", env!("CARGO_PKG_VERSION"), "-nuwa-v0.2
 |---|---|
 | `widgets.rs` | 新增 `port_line()` 与 `PORT_BELOW_DP`(36.5)；`author_line()` 与它共用 `hero_line()`，只是垂直位置不同 |
 | `app.rs` | `HeroArt` 新增 `port` 字段，与 `author` 一同绘制、一同随滚动淡出缩放 |
-| `pages.rs` | 新增 `PORT` 常量 `© 2026 Lin Zixi`；许可页在原文之上新增「修改说明」段（中/繁/英），写明修改部分版权与三处改动 |
+| `pages.rs` | 新增 `PORT` 常量 `© 2026 Casper Lin`；许可页在原文之上新增「修改说明」段（中/繁/英），写明修改部分版权与三处改动 |
 
 许可页那段是 GPL-3 第 5(a) 条对修改版本的要求：显著声明改动过、以及改动的时间。它放在
 「原文」段（`LICENSE_ORIGINAL`）之前，原文本身不动。

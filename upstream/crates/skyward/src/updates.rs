@@ -39,15 +39,16 @@ pub enum Task {
     /// Download `release`'s full package to `path`; `server` is asked again
     /// for where it is when the addresses it gave have run out.
     Download { server: String, installed: Installed, release: Release, path: PathBuf },
-    /// Ask GitHub for Skyward's newest release and its zip for the phone
-    /// `codename` names; where that fails, `probe` says whether the network
-    /// is why.
-    CheckSkyward { probe: String, codename: String },
+    /// Ask the port's own GitHub repository for its newest release and the
+    /// zip for the phone `codename` names. An empty `repo` means no release
+    /// channel is configured: the check goes nowhere and answers that this
+    /// build is current. `release` is the port's plain semver version.
+    CheckSkyward { probe: String, codename: String, repo: String, release: String },
     /// Download `build` to `path`, check that its image is Skyward for the
     /// phone `codename` names, and write the image into the recovery
     /// partitions of the slot that starts next and of any other slot that
     /// holds Skyward.
-    UpdateSkyward { build: Build, codename: String, path: PathBuf },
+    UpdateSkyward { build: Build, codename: String, path: PathBuf, release: String },
 }
 
 pub enum Event {
@@ -148,20 +149,32 @@ impl Worker {
                         let end = fetch(&servers, release.urls.clone(), &sum, &release.name, &path, &stopping, &using, &tell, &mut refused);
                         tell(Event::Ended(end));
                     }
-                    Task::CheckSkyward { probe, codename } => {
+                    Task::CheckSkyward { probe, codename, repo, release } => {
                         let a = http::agent(servers.clone());
                         *using.lock().expect("the agent is not held by a thread that panicked") = Some(a.clone());
-                        let answer = github::ask(&a, &codename, skyward_info::UPSTREAM).map_err(|e| unanswered(&e, github::LATEST, &probe, &servers));
+                        let answer = if repo.is_empty() || release.is_empty() {
+                            // With no release channel of its own this build
+                            // goes nowhere. Falling back to the upstream
+                            // project's releases would offer an image that
+                            // is not this port's and silently replace it.
+                            let _ = skyward_sys::kmsg("install: no port release repository is configured, the update check stays idle");
+                            let shown = if release.is_empty() { skyward_info::UPSTREAM.into() } else { release };
+                            Ok(github::Newest { version: shown, newer: false, build: None })
+                        } else {
+                            let url = github::latest(&repo);
+                            github::ask(&a, &repo, &codename, &release)
+                                .map_err(|e| unanswered(&e, &url, &probe, &servers))
+                        };
                         tell(Event::SkywardChecked(answer));
                     }
                     // GitHub's API hands the zip out at a short-lived address
                     // of the file itself, which it gives again once one has
                     // run out and is turned down; the release's link on
                     // github.com is tried after it.
-                    Task::UpdateSkyward { build, codename, path } => {
+                    Task::UpdateSkyward { build, codename, path, release } => {
                         let a = http::agent(servers.clone());
                         *using.lock().expect("the agent is not held by a thread that panicked") = Some(a.clone());
-                        let located = github::locate(&a, &build.url, skyward_info::UPSTREAM)
+                        let located = github::locate(&a, &build.url, &release)
                             .inspect_err(|e| {
                                 let _ = skyward_sys::kmsg(&format!("asking GitHub where {} is: {e:#}", build.name));
                             })
@@ -172,7 +185,7 @@ impl Worker {
                                 return Again::Retry;
                             }
                             located_again = true;
-                            match github::locate(a, &build.url, skyward_info::UPSTREAM) {
+                            match github::locate(a, &build.url, &release) {
                                 Ok(fresh) => Again::From(build.sources(Some(fresh))),
                                 Err(e) => {
                                     let _ = skyward_sys::kmsg(&format!("asking GitHub again where {} is: {e:#}", build.name));

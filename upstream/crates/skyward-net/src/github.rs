@@ -1,11 +1,17 @@
-//! Skyward's own releases on GitHub: which is the newest, and the zip in
-//! it for one phone, as the release workflow names each phone's.
+//! A port's own releases on GitHub: which is the newest, and the zip in it
+//! for one phone, as the release workflow names each phone's. The repository
+//! is given by the device's configuration, so a port publishes its images
+//! without this crate knowing whose releases it is reading.
 
 use anyhow::{bail, ensure, Context, Result};
 use serde::Deserialize;
 
-/// Where GitHub answers which release of Skyward is the newest.
-pub const LATEST: &str = "https://api.github.com/repos/kirklin/skyward/releases/latest";
+/// Where GitHub answers which release of `repo` is the newest. A port names
+/// its own repository as `owner/name`; the upstream project's is not used
+/// unless a port names it explicitly.
+pub fn latest(repo: &str) -> String {
+    format!("https://api.github.com/repos/{repo}/releases/latest")
+}
 
 /// The version of GitHub's API the answer is read as.
 const API_VERSION: &str = "2022-11-28";
@@ -69,7 +75,7 @@ struct Message {
     message: String,
 }
 
-/// The newest release that `answer`, GitHub's answer at [`LATEST`], tells
+/// The newest release that `answer`, GitHub's answer at [`latest`], tells
 /// of, and its zip for the phone `codename` names, as the build of version
 /// `running` sees it.
 pub fn newest(answer: &str, codename: &str, running: &str) -> Result<Newest> {
@@ -92,18 +98,19 @@ pub fn newest(answer: &str, codename: &str, running: &str) -> Result<Newest> {
     Ok(Newest { version: version.to_string(), newer: newest > this, build })
 }
 
-/// Ask GitHub for Skyward's newest release, and its zip for the phone
-/// `codename` names, as the build of version `running`.
-pub fn ask(agent: &ureq::Agent, codename: &str, running: &str) -> Result<Newest> {
+/// Ask `repo` for its newest release, and its zip for the phone `codename`
+/// names, as the build of version `running`.
+pub fn ask(agent: &ureq::Agent, repo: &str, codename: &str, running: &str) -> Result<Newest> {
+    let url = latest(repo);
     let mut response = agent
-        .get(LATEST)
+        .get(&url)
         .header("Accept", "application/vnd.github+json")
         .header("X-GitHub-Api-Version", API_VERSION)
         .header("User-Agent", format!("Skyward/{running}"))
         .call()
-        .with_context(|| format!("ask {LATEST}"))?;
+        .with_context(|| format!("ask {url}"))?;
     let status = response.status();
-    let body = response.body_mut().read_to_string().with_context(|| format!("read the answer of {LATEST}"))?;
+    let body = response.body_mut().read_to_string().with_context(|| format!("read the answer of {url}"))?;
     if !status.is_success() {
         bail!(refusal(status, &body));
     }
@@ -237,5 +244,28 @@ mod tests {
         let untagged = ANSWERED_013.replace("\"tag_name\":\"v0.1.3\"", "\"tag_name\":\"nightly\"");
         assert!(newest(&untagged, "ishtar", "0.1.2").is_err());
         assert!(newest("{}", "ishtar", "0.1.2").is_err());
+    }
+
+    #[test]
+    fn a_port_asks_its_own_repository_never_the_upstream_one() {
+        assert_eq!(
+            latest("linzixi/skyward-nuwa"),
+            "https://api.github.com/repos/linzixi/skyward-nuwa/releases/latest"
+        );
+        assert!(!latest("linzixi/skyward-nuwa").contains("kirklin"), "a port does not fall back to upstream releases");
+    }
+
+    #[test]
+    fn a_ports_release_number_decides_whether_its_own_release_is_newer() {
+        // The tag and every asset name carry the same version, as a real
+        // release does. Compare against the port's plain semver release
+        // number rather than the composite version on the About page.
+        let ours = ANSWERED_013.replace("v0.1.3", "v1.0.0");
+        let same = newest(&ours, "ishtar", "1.0.0").unwrap();
+        assert_eq!(same.version, "1.0.0");
+        assert!(!same.newer, "the release that is running is not newer than itself");
+        assert!(same.build.is_some(), "and its zip for this phone is still found");
+        let older = newest(&ours, "ishtar", "0.9.0").unwrap();
+        assert!(older.newer, "a later release is offered");
     }
 }

@@ -24,7 +24,7 @@ recovery 变成**原生支持 data 解密**的 Skyward。
 | 当前版本 | `SW-v0.2.0-nuwa-v0.2.4`（上游基线 v0.2.0，本移植第 6 版） |
 | 适用机型 | 小米 13 Pro（`nuwa`），已验证 OS3.0.312.0.WMBCNXM / Android 16 / SDK 36 |
 | 系统要求 | 已解锁 Bootloader；A/B 分区；独立 `recovery` 分区 |
-| 移植 | Lin Zixi |
+| 移植 | Casper Lin |
 | 许可 | GPL-3.0（与上游一致） |
 | 更新日志 | [CHANGELOG.md](CHANGELOG.md) |
 | 新机型适配 | [docs/PORTING.md](docs/PORTING.md)（交接文档：改动清单、配置采集、验收步骤） |
@@ -137,10 +137,10 @@ fastboot reboot recovery
 
 - [kirklin/skyward](https://github.com/kirklin/skyward) —— 上游，本移植的全部基础；
   Skyward © 2026 Kirk Lin
-- nuwa 移植与本文档 © 2026 Lin Zixi，按 GPL-3.0 发布
+- nuwa 移植与本文档 © 2026 Casper Lin，按 GPL-3.0 发布
 - MiSans 字体（小米）、KirkMono 字体，见 `upstream/resources/fonts/`
 
-About 页的署名也按同样的顺序排列：`© 2026 Kirk Lin` 在上，`© 2026 Lin Zixi` 在下，
+About 页的署名也按同样的顺序排列：`© 2026 Kirk Lin` 在上，`© 2026 Casper Lin` 在下，
 两行形式一致——前者是原作者，后者是改动者，具体改了什么写在许可页的「修改说明」里。
 原作者的版权行在任何情况下都不删除——这是 GPL-3 的保留声明要求，也是本移植唯一无法
 「改」的地方。
@@ -160,4 +160,4 @@ always-on clock and caps-lock on the on-screen keyboard.
 
 Build with `bash build.sh`; the image lands in `upstream/target/out/<VERSION>/`. See
 [docs/BUILD.md](docs/BUILD.md) and [docs/FLASH.md](docs/FLASH.md) (Chinese).
-Licensed GPL-3.0, as upstream. Skyward © 2026 Kirk Lin; the nuwa port © 2026 Lin Zixi.
+Licensed GPL-3.0, as upstream. Skyward © 2026 Kirk Lin; the nuwa port © 2026 Casper Lin.

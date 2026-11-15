@@ -2532,7 +2532,12 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                     Effect::CheckSkyward => {
                         ensure!(skyward_checker.is_none(), "GitHub is being asked already");
                         let probe = cfg.wlan.as_ref().context("the phone's WLAN is not brought up")?.probe.clone();
-                        let task = updates::Task::CheckSkyward { probe, codename: cfg.device.codename.clone() };
+                        // A build with no release channel of its own has an
+                        // empty repo; the worker then asks nobody at all.
+                        let (repo, release) = cfg.update.as_ref()
+                            .map(|u| (u.repo.clone(), u.release.clone()))
+                            .unwrap_or_default();
+                        let task = updates::Task::CheckSkyward { probe, codename: cfg.device.codename.clone(), repo, release };
                         skyward_checker = Some(updates::Worker::start(task, servers.clone())?);
                     }
                     // The zip goes into the recovery's own folder, which is
@@ -2543,7 +2548,9 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                         ensure!(installer.is_none(), "an installer is running already");
                         skyward_sys::kmsg(&format!("updating Skyward to {}", build.name))?;
                         let path = Path::new(skyward_sys::RUN).join(&build.name);
-                        let task = updates::Task::UpdateSkyward { build, codename: cfg.device.codename.clone(), path };
+                        let release = cfg.update.as_ref().map(|u| u.release.clone())
+                            .unwrap_or_else(|| skyward_info::UPSTREAM.into());
+                        let task = updates::Task::UpdateSkyward { build, codename: cfg.device.codename.clone(), path, release };
                         skyward_updater = Some(updates::Worker::start(task, servers.clone())?);
                     }
                     Effect::StopSkywardUpdate => skyward_updater.as_ref().context("Skyward is not being updated")?.stop(),

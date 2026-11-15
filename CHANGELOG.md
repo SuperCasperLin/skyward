@@ -3,6 +3,43 @@
 本项目的版本号为 `SW-v<上游基线>-nuwa-v<本移植版本>`。格式参考
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [SW-v0.2.0-nuwa-v0.2.4 同版本重打] — 2026-11-15
+
+沿 v0.2.4 的原有功能，**不升版本号**；这次只改发行链路，镜像内容（除配置与署名外）与
+已刷入的那一版相同。
+
+### 新增
+
+- **在线更新指向我们自己的 GitHub release**。以前 `skyward-net` 把更新地址写死为
+  `kirklin/skyward`，设备自报版本 `0.2.0`，上游最新 `v0.3.1` 会被当成可用更新——
+  而官方 nuwa 包并未在真机验证过，点一次就会把我们的定制全部覆盖。现在
+  `[update].repo` / `[update].release` 由设备配置提供：`repo` 为空时**不联网、直接回答
+  「已是最新」**，绝不回退到官方；填好仓库后按纯 semver 发行序号比较
+  （`release = "1.0.0"` → tag `v1.0.0`）。
+- **两种发布包**：`tools/make_flashable_zip.py` 产出给第三方 REC 用的卡刷包；
+  `tools/make_release_zip.py` 产出给 Recovery 内在线更新用的「单 `.img` 条目」包。
+  两者不通用，见 [docs/RELEASE.md](docs/RELEASE.md)、[docs/FLASHABLE.md](docs/FLASHABLE.md)。
+- **对外署名统一为 `Casper Lin`**（About 页、许可页三语、README、卡刷包作者行与说明）。
+
+### 验证
+
+- 交叉编译主程序与三个 crate 的测试二进制通过；真机（13 Pro）跑
+  `skyward_net` 39/0、`skyward_config` 26/0、`skyward_ui` 357/1（唯一失败是
+  `lang::tests::the_typeface_draws_every_text_the_pages_write`，需读源码树，属环境限制）。
+- 镜像内 `system/bin/recovery` sha256 `6a08cf83c10ccb2c4b22bda0205ac921104254311789c97dd6cc9bc73ac69f71`
+  与本地构建一致；镜像内 `device.toml` 含 `repo = "SuperCasperLin/skyward"`、`release = "1.0.0"`。
+- 真机运行与在线更新端到端验收在刷入后进行。
+
+### 产物
+
+- 镜像 sha256 `abcd9c8ce80f5c69390995ac9745252939e38f7dca3e2704cc244374ea1d385c`
+  （`SW-v0.2.0-nuwa-v0.2.4.img`，104 857 600 字节，ramdisk 48 411 038 字节）。
+- 在线更新包 `skyward-v1.0.0-nuwa-OS3.0.312.0.WMBCNXM.zip` sha256
+  `502ae06ab92e1236bef47be27c0ffecb394c40a1e1f07fff8b4712d478d3dee4`。
+- 卡刷包 `SW-v0.2.0-nuwa-v0.2.4-flashable.zip` sha256
+  `f18a48c55be4cc69361af73f650ecf79eca3b0bd7ced820231d06ca6d3698724`。
+- 上一版镜像 `59e568a0…` 已备份到 `out/backup/`，标签 `SW-v0.2.0-nuwa-v0.2.4` 保留作回退点。
+
 ## [SW-v0.2.0-nuwa-v0.2.4] — 2026-11-11
 
 第六版。锁屏的磨砂玻璃跟着会动的页面**每帧实时**变化（约 62 fps），并修掉两处锁屏
