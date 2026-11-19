@@ -195,9 +195,11 @@ server = "https://update.miui.com/updates/miotaV3.php"
 # （那些镜像不是我们这个移植，刷进去会丢掉全部定制）。部署到 GitHub 后填这里，
 # 只需重新打包镜像，不必改代码。
 repo = "SuperCasperLin/skyward"
-# 纯 semver 发行序号，只用于在线更新比较。第一次发布打 v1.0.0，之后每次
-# 适配上游新基线或发新版递增（v1.1.0 ...）。About 页仍显示 SW-v...-nuwa-v...
-release = "1.0.0"
+# 发行序号，与移植版本号的尾段保持一致：About 页显示 SW-v0.2.0-nuwa-v0.2.4，
+# 在线更新的标签就是 v0.2.4，界面上看到的始终是同一个号。发新版时两处一起递增
+# （移植版本号 v0.2.5 → 这里 0.2.5）。标签一旦发布不要改动或重建，否则已刷入的
+# 设备会比较出错乱。
+release = "0.2.4"
 
 # The stock build the recovery is made on: the Chinese system's
 # OS3.0.312.0, whose full update package on the phone maker's own download

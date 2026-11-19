@@ -1,10 +1,18 @@
 # 卡刷包（flashable ZIP）
 
-把本项目的 recovery 镜像做成 ZIP，让已经刷了第三方 recovery（TWRP / OrangeFox 等）的人
-可以直接在 REC 里「安装」刷入，不必连电脑用 fastboot。
+把本项目的 recovery 镜像做成 ZIP，**通刷**：可以在第三方 REC（TWRP / OrangeFox 等）里
+「安装」刷入，也可以直接在 Skyward 自己的 Recovery 里刷入（覆盖安装新版），不必连电脑
+用 fastboot。
 
 > **当前产物**：`SW-v0.2.0-nuwa-v0.2.4-flashable.zip`，**仅适用于小米 13 Pro（`nuwa`）**。
 > 小米 9（`cepheus`）走另一条分支与另一套镜像，不要用这个包。
+
+> **在 Skyward 里刷的条件**：Skyward 自 v0.2.4 起放行「recovery 卡刷包」——安装器不再
+> 把脚本写进去的 Skyward 写回（`skyward-install/src/keep.rs` 的 `restore()`，一行规则：
+> 装进去的仍是 Skyward 就保留，下次启动的槽因此始终持有 Skyward；写成非 Skyward 的东西
+> 才按「自动重新刷入 Skyward」开关还原，防系统刷机包覆盖 recovery 的保护不变）。
+> 更旧的 Skyward 版本里，开关开着会「假成功」（显示成功、重启还原），请改用第三方 REC
+> 或 fastboot，或在安装页「选项」里关掉该开关再刷。
 
 ## 怎么用
 
@@ -34,8 +42,8 @@
   原厂底座 / Stock : OS3.0.312.0.WMBCNXM
   分区 / Target    : recovery_a + recovery_b (A/B 双槽 / both slots)
   镜像 / Image     : 100 MiB (104857600 bytes)
-  SHA-256          : 59e568a0…4cfd35b24e4
-  打包 / Built     : 2026-11-14
+  SHA-256          : 918089c6…4de6f3965098
+  打包 / Built     : 2026-11-15
   ----------------------------------------------
   上游项目 / Upstream : kirklin/skyward
   上游作者 / Author   : Kirk Lin
@@ -56,6 +64,7 @@
    · 仅限 nuwa，其他机型会被拒绝
    · 需已解锁 Bootloader
    · 不会清除 /data 与内部存储
+   · 可在第三方 REC 或 Skyward 里直接刷入（通刷）
    · 建议先用本 REC 备份原厂 recovery
 ==============================================
 ```
@@ -98,6 +107,9 @@ REC 调用 `update-binary <api> <outfd> <zip>`；脚本往 `<outfd>` 写 `ui_pri
 
 ## 四道安全校验
 
+脚本本身是**通刷的 dumb 包**：不探测宿主 Recovery、不读任何开关或设置文件——
+环境适配的责任在 Skyward 的安装器（`restore()` 放行规则），不在包里。
+
 | 关卡 | 做什么 | 不通过 |
 |---|---|---|
 | 机型 | 读 `ro.product.device` / `ro.build.product` / `ro.product.vendor.device` / `ro.product.odm.device` / `/proc/cmdline`，必须命中 `nuwa` | 直接中止 |
@@ -128,6 +140,34 @@ python tools/make_flashable_zip.py \
 - 产物是 ZIP 加同名 `.zip.sha256`。
 - 生成器只**读取**镜像与配置，不改仓库里任何源码，也不依赖当前 git 分支。
 
+## 刷完怎么确认真的生效了
+
+在 Recovery 里连 adb，或在能执行 shell 的 REC 里：
+
+```bash
+# 1. 两个槽都应该是同一个新镜像哈希
+sha256sum /dev/block/by-name/recovery_a /dev/block/by-name/recovery_b
+
+# 2. 正在运行的程序确实是这张镜像里的
+sha256sum /system/bin/recovery
+
+# 3. 配置里必须有我们自己的发行仓库与序号
+grep -A 12 '^\[update\]' /skyward/device.toml    # repo = "SuperCasperLin/skyward", release = "0.2.4"
+```
+
+最直观的一条：在设置里点「检查更新」，新版会显示**已是最新**（设备自报 `0.2.4`，
+线上标签也是 `v0.2.4`——发行序号与移植版本号尾段一致，界面只有一个号）。
+**如果它还在提示上游 `v0.3.1`，说明跑的仍是旧版镜像**，刷入没有生效——
+旧版把更新地址硬编码为 `kirklin/skyward`，新版里那个字符串出现次数为 0。
+
+若两个槽哈希不一致（一个新一个旧），直接在 REC 里把正确的槽复制过去即可，
+不必重刷整个包：
+
+```bash
+dd if=/dev/block/by-name/recovery_a of=/dev/block/by-name/recovery_b bs=4M
+sync
+```
+
 ## 回退
 
 用 REC 里备份的原厂 `recovery` 分区，或从官方 full OTA 提取 `recovery.img` 后：
@@ -150,15 +190,22 @@ fastboot flash recovery stock-recovery-nuwa.img
 - 若确认机型正确却被「机型不符」拒绝，多半是第三方 REC 没暴露机型属性；
   解压出 `recovery.img` 改用 fastboot，或换一个 REC。
 - 刷写过程中不要断电。脚本失败会中止并报错，不会留下半截镜像。
-- 在 **Skyward 自己**里安装这个包属于自更新场景，其「保留当前 recovery」选项会
-  影响结果；普通安装不受影响，但推荐在第三方 REC 里刷。
+- **通刷但分版本**：Skyward v0.2.4 起，安装器放行「写入的仍是 Skyward」的卡刷包
+  （见顶部说明），在 Skyward 里直接覆盖安装即可；更旧的 Skyward（如 v0.2.3 及更早）
+  里刷会被还原成旧版——改用第三方 REC / fastboot，或先在安装页「选项」里关闭
+  「自动重新刷入 Skyward」。第三方 REC 无此版本要求。
+- 在 Skyward 自己里刷的场景（2026-11-15 真机实测过的历史坑）：旧版安装器会在脚本
+  退出后把旧镜像写回下次启动的槽——显示「刷入成功」但重启仍是旧版，典型症状是还能
+  收到上游 `v0.3.1` 的更新提示。v0.2.4 已从安装器侧修复，包脚本不做任何探测。
+  需要免开关的自更新用「在线更新」：那条路径走 `upgrade::write()`，不经过脚本安装器，
+  一直不受影响。
 
 ## 校验值
 
 | 文件 | SHA-256 |
 |---|---|
-| `SW-v0.2.0-nuwa-v0.2.4-flashable.zip` | 见同目录 `.zip.sha256` |
-| 包内 `recovery.img` | `59e568a02be1cd2881b9cbaad582d961392c76d044519eb0361604cfd35b24e4` |
+| `SW-v0.2.0-nuwa-v0.2.4-flashable.zip` | `c2b70d80b9c67334ce65cd29dc11ddebaf7929a4c6d961aa229b43b19dbc10c0`（另见同目录 `.zip.sha256`） |
+| 包内 `recovery.img` | `918089c69342f0e6bbe5716090f1a27463f4de6f3965098baa81b0c8ccc828dc` |
 
-镜像哈希与 [CHANGELOG.md](../CHANGELOG.md) 里已发版的 v0.2.4 镜像一致——
+镜像哈希与 [CHANGELOG.md](../CHANGELOG.md) 里同版本重打的 v0.2.4 镜像一致——
 卡刷包**没有重新打包 recovery**，只是把同一张镜像换了个刷入方式。

@@ -74,16 +74,19 @@ fn read(path: &Path) -> Result<(Held, Vec<u8>)> {
 
 /// The slots whose recovery partition gets this recovery back once an
 /// install is done, by what each held `before` and `after` it, slot A
-/// first: the slot that starts next, `next`, unless it holds this build,
-/// whose digest is `own`; and any other the install wrote over with
-/// something that is not Skyward.
+/// first. A slot the install leaves holding Skyward keeps what it was
+/// given — someone plainly flashed a recovery there on purpose, and it
+/// may well be a newer build of this one, as when a package updates the
+/// recovery itself. The slot that starts next, `next`, goes back only
+/// once the install put something that is not Skyward there, and so does
+/// any other slot it wrote over with something that is not Skyward.
 pub fn restore(before: [Held; 2], after: [Held; 2], own: [u8; 32], next: Slot) -> Vec<Slot> {
     [Slot::A, Slot::B]
         .into_iter()
         .filter(|&slot| {
             let k = slot.number() as usize;
             match slot == next {
-                true => after[k].digest != own,
+                true => after[k].digest != own && !after[k].skyward,
                 false => after[k].digest != before[k].digest && !after[k].skyward,
             }
         })
@@ -106,8 +109,22 @@ mod tests {
     fn the_slot_that_starts_next_gets_this_build() {
         assert_eq!(restore([SKYWARD, OLD], [SKYWARD, STOCK], OWN, Slot::B), [Slot::B], "an update or a package that went to slot B");
         assert_eq!(restore([SKYWARD, OLD], [SKYWARD, OLD], OWN, Slot::B), [Slot::B], "an older recovery there, left alone by the install");
-        assert_eq!(restore([SKYWARD, OTHER_BUILD], [SKYWARD, OTHER_BUILD], OWN, Slot::B), [Slot::B], "another build of Skyward there");
         assert!(restore([SKYWARD, SKYWARD], [SKYWARD, SKYWARD], OWN, Slot::A).is_empty(), "this recovery is there already");
+    }
+
+    #[test]
+    fn a_slot_the_install_leaves_holding_skyward_keeps_it() {
+        // A package that flashes a recovery — a newer build of this one,
+        // say — is the user's own intent: whatever slot it lands on keeps
+        // what it was given, instead of being written back over once the
+        // script ends. This is what makes a recovery flashable zip work
+        // from inside Skyward itself. The one promise kept is that the
+        // slot that starts next holds Skyward: a slot the install did not
+        // touch, or wrote something else into, still goes back to this
+        // build, as before.
+        assert!(restore([SKYWARD, OLD], [SKYWARD, OTHER_BUILD], OWN, Slot::B).is_empty(), "the slot that starts next keeps a Skyward the install put there");
+        assert!(restore([SKYWARD, OLD], [OTHER_BUILD, OTHER_BUILD], OWN, Slot::B).is_empty(), "wherever it lands");
+        assert_eq!(restore([SKYWARD, OLD], [OTHER_BUILD, OLD], OWN, Slot::B), [Slot::B], "the next slot it did not touch still goes back to this build");
     }
 
     #[test]

@@ -4,7 +4,7 @@
 让手机里的 Recovery 直接更新我们发布的镜像（官方 → 我们 → 手机）。
 
 > **当前状态（2026-11-15）**：代码已改好，发行仓库为 **`SuperCasperLin/skyward`**（public fork，
-> 代码推在 `nuwa` 分支），`release = "1.0.0"` 是第一个发行序号。release 上线后在线更新即生效；
+> 代码推在 `nuwa` 分支），`release = "0.2.4"` 与移植版本号尾段一致。release 上线后在线更新即生效；
 > 在 release 发布前设备点「检查更新」只会查到暂无 release，**不会回退到官方包**。
 
 ## 为什么要改
@@ -19,17 +19,21 @@ codename 全都满足校验——**点一次更新就会把官方未实测的 nu
 
 ## 版本序列
 
-复合版本号 `SW-v0.2.0-nuwa-v0.2.4` 只用于展示与镜像命名，**不是 semver**，不能拿去和
-GitHub 的 tag 比。因此配置里另有一个纯 semver 的发行序号：
+**在线更新的 tag 就是移植版本号本身**，界面上只有一个号。复合串
+`SW-v0.2.0-nuwa-v0.2.4` 不是 semver（`SW-` 前缀、机型段），没法直接拿去比较，所以
+`[update].release` 单独存尾段的纯 semver 形式，两者必须同步改：
 
 | 用途 | 值 | 位置 |
 |---|---|---|
 | About 页 / 镜像名 | `SW-v0.2.0-nuwa-v0.2.4` | `VERSION`、`skyward-info::VERSION` |
-| 在线更新比较 | `1.0.0` → tag `v1.0.0` | `[update].release` |
+| 在线更新比较 | `0.2.4` → tag `v0.2.4` | `[update].release` |
 
-规则：**发行序号只增不减**，`v1.0.0` 对应当前这版，之后每适配一次上游新基线或发一次
-新版就递增（`v1.1.0`、`v1.2.0`…）。tag 一旦发布不要改动或重建，否则已刷入的设备会
-比较出错乱。生成器会用 `[update].release` 反推 tag，避免两者写歪。
+规则：nuwa 这条适配线的移植尾段**只增不重置**（0.2.4 → 0.2.5 → …，跨上游基线也继续
+递增，不回到 v0.1.0），于是检查更新界面显示的号永远和 About 页一致。
+tag 一旦发布不要改动或重建，否则已刷入的设备会比较出错乱。
+生成器会用 `[update].release` 反推 tag 与更新包文件名，避免两者写歪。
+（曾用过独立的 `v1.0.0` 序列，2026-11-16 起废弃：两套号让「当前 0.2.4、最新 1.0.0、
+却是最新」这种界面自相矛盾，已全部对齐为移植版本号尾段。）
 
 ## 配置字段
 
@@ -40,7 +44,7 @@ GitHub 的 tag 比。因此配置里另有一个纯 semver 的发行序号：
 [update]
 server  = "https://update.miui.com/updates/miotaV3.php"   # 厂商系统 OTA 检查，不动
 repo    = "SuperCasperLin/skyward"   # 留空 = 不联网、直接回答「已是最新」
-release = "1.0.0"     # 纯 semver，与 GitHub tag 的 v 前缀对应
+release = "0.2.4"     # 纯 semver，与移植版本号尾段一致，tag 为 v0.2.4
 ```
 
 `repo` 留空时 `updates.rs` 会记一行 kmsg 并返回 `newer: false`，**不会回退到上游官方**。
@@ -61,7 +65,7 @@ release = "1.0.0"     # 纯 semver，与 GitHub tag 的 v 前缀对应
 `skyward-{tag}-{codename}-` 开头、以 `.zip` 结尾，且 GitHub API 给出
 `digest: sha256:...`（上传 asset 时 GitHub 自动生成）。
 
-`out/release/` 里的 `skyward-v1.0.0-nuwa-OS3.0.312.0.WMBCNXM.zip` 必须用**重新打包后的镜像**
+`out/release/` 里的 `skyward-v0.2.4-nuwa-OS3.0.312.0.WMBCNXM.zip` 必须用**重新打包后的镜像**
 再生成一次才是正式发布包；任何用旧镜像 `59e568a0…` 生成的包都只是格式验证产物，不要上传。
 
 ## 部署流程
@@ -77,11 +81,11 @@ release = "1.0.0"     # 纯 semver，与 GitHub tag 的 v 前缀对应
      --image upstream/target/out/SW-v0.2.0-nuwa-v0.2.4/SW-v0.2.0-nuwa-v0.2.4.img \
      --out out/release
    ```
-5. 建 GitHub 仓库、推送代码；建 tag `v1.0.0` 的 Release，上传
-   `skyward-v1.0.0-nuwa-OS3.0.312.0.WMBCNXM.zip` 与 `SHA256SUMS`。
+5. 建 GitHub 仓库、推送代码；建 tag `v0.2.4` 的 Release，上传
+   `skyward-v0.2.4-nuwa-OS3.0.312.0.WMBCNXM.zip` 与 `SHA256SUMS`。
    release 不要勾 prerelease（`/releases/latest` 会跳过预发布）。
-6. 手机里点「检查更新」：应显示「已是最新」（因为设备自报 `1.0.0`，最新 tag 也是
-   `v1.0.0`），且不出现任何官方版本的提示。
+6. 手机里点「检查更新」：应显示「已是最新」（设备自报 `0.2.4`，最新 tag 也是
+   `v0.2.4`），且不出现任何官方版本的提示。
 7. 以后发 `v1.1.0`：改 `[update].release` → 重打包 → 生成新 zip → 发新 release，
    用户即可在 Recovery 内直接更新。
 

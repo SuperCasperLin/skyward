@@ -880,9 +880,10 @@ fn run_script(ctx: &mut Context, size: u64) -> Result<Done> {
     if let Err(e) = clean_up(&mounted, &mapped) {
         let _ = kmsg(&format!("install: not all the script left behind was taken away: {e:#}"));
     }
-    // What the script wrote over goes back however it ended, and so does
-    // the recovery of the slot that starts next, which a package that
-    // installs to the other slot switches to.
+    // What the script wrote over goes back however it ended, but only
+    // where it did not leave a recovery of Skyward's own: one put there
+    // on purpose — a package updating the recovery itself — stays, and
+    // the slot that starts next is no exception.
     if let Some(kept) = &kept {
         reflash(ctx, kept, skyward_vab::boot::next_slot().context("ask which slot starts next"));
     }

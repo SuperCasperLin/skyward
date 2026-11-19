@@ -14,8 +14,9 @@
   `kirklin/skyward`，设备自报版本 `0.2.0`，上游最新 `v0.3.1` 会被当成可用更新——
   而官方 nuwa 包并未在真机验证过，点一次就会把我们的定制全部覆盖。现在
   `[update].repo` / `[update].release` 由设备配置提供：`repo` 为空时**不联网、直接回答
-  「已是最新」**，绝不回退到官方；填好仓库后按纯 semver 发行序号比较
-  （`release = "1.0.0"` → tag `v1.0.0`）。
+  「已是最新」**，绝不回退到官方；填好仓库后按纯 semver 比较，发行序号
+  **就是移植版本号的尾段**（`release = "0.2.4"` → tag `v0.2.4`），About 页、
+  镜像名、检查更新界面看到的始终是同一个号。
 - **两种发布包**：`tools/make_flashable_zip.py` 产出给第三方 REC 用的卡刷包；
   `tools/make_release_zip.py` 产出给 Recovery 内在线更新用的「单 `.img` 条目」包。
   两者不通用，见 [docs/RELEASE.md](docs/RELEASE.md)、[docs/FLASHABLE.md](docs/FLASHABLE.md)。
@@ -26,18 +27,35 @@
 - 交叉编译主程序与三个 crate 的测试二进制通过；真机（13 Pro）跑
   `skyward_net` 39/0、`skyward_config` 26/0、`skyward_ui` 357/1（唯一失败是
   `lang::tests::the_typeface_draws_every_text_the_pages_write`，需读源码树，属环境限制）。
-- 镜像内 `system/bin/recovery` sha256 `6a08cf83c10ccb2c4b22bda0205ac921104254311789c97dd6cc9bc73ac69f71`
-  与本地构建一致；镜像内 `device.toml` 含 `repo = "SuperCasperLin/skyward"`、`release = "1.0.0"`。
+- 镜像内 `system/bin/recovery` sha256 `e13ac10b5f5f0659b6472ed2e9b3e493bfafb242c5ccd800a198bb25a01219b6`
+  与本地构建一致；镜像内 `device.toml` 含 `repo = "SuperCasperLin/skyward"`、`release = "0.2.4"`。
 - 真机运行与在线更新端到端验收在刷入后进行。
 
 ### 产物
 
-- 镜像 sha256 `abcd9c8ce80f5c69390995ac9745252939e38f7dca3e2704cc244374ea1d385c`
-  （`SW-v0.2.0-nuwa-v0.2.4.img`，104 857 600 字节，ramdisk 48 411 038 字节）。
-- 在线更新包 `skyward-v1.0.0-nuwa-OS3.0.312.0.WMBCNXM.zip` sha256
-  `502ae06ab92e1236bef47be27c0ffecb394c40a1e1f07fff8b4712d478d3dee4`。
-- 卡刷包 `SW-v0.2.0-nuwa-v0.2.4-flashable.zip` sha256
-  `f18a48c55be4cc69361af73f650ecf79eca3b0bd7ced820231d06ca6d3698724`。
+- 镜像 sha256 `918089c69342f0e6bbe5716090f1a27463f4de6f3965098baa81b0c8ccc828dc`
+  （`SW-v0.2.0-nuwa-v0.2.4.img`，104 857 600 字节，ramdisk 48 411 214 字节）。
+- 在线更新包 `skyward-v0.2.4-nuwa-OS3.0.312.0.WMBCNXM.zip` sha256
+  `5df483a14ac32557ddb0246799675495c8b8045637844645be4b135f2e2fd465`。
+- 卡刷包 `SW-v0.2.0-nuwa-v0.2.4-flashable.zip`：初次发布的
+  `f18a48c5…` 含下述缺陷；**本地已重出修复版**
+  `c2b70d80b9c67334ce65cd29dc11ddebaf7929a4c6d961aa229b43b19dbc10c0`，GitHub release 上为当前版。
+- **修复：在 Skyward 里刷 recovery 卡刷包会被还原成旧版（假成功）**。Skyward 的安装器
+  在每个安装脚本结束后把当前 recovery 写回下次启动的槽位（`hold`/`reflash`），本意是
+  防止系统刷机包把 recovery 覆盖掉——但对「脚本写入的就是另一个 Skyward」的场景，
+  这是用户明确的刷入意图，写回去就成了假成功：脚本虽把 `recovery_a`、`recovery_b`
+  都写入并回读通过、屏幕显示「刷入成功」，重启后一切照旧，还能收到上游 `v0.3.1` 的
+  更新提示。现在 `keep.rs::restore()` 的规则改为：**安装器留下的是 Skyward 的槽一律
+  保留**（无论哪个槽、无论新旧构建——用户刷什么 recovery 就得到什么）；只有被写成
+  非 Skyward 的东西（系统刷机包带的官方 recovery 等）才按「自动重新刷入 Skyward」
+  开关还原，防覆盖的保护不变。不变量保持：下次启动的槽永远持有 Skyward。
+  由此卡刷包**真正通刷**：第三方 REC 与 Skyward 自身都能直接刷，包脚本回归
+  dumb——不做任何宿主探测、不读任何开关或设置文件（此前一版曾让脚本读开关做
+  分支，已删；顺带修掉解析管道里 `head -1` 被脚本自定义的 `head()` 界面函数覆盖
+  的问题，本地模拟测试抓到）。真机 `skyward-install` 测试 **123 通过 / 0 失败**
+  （含新用例：next 槽被写成另一构建则放行、未触碰的 next 槽仍还原回当前构建）。
+  免开关的自更新走「在线更新」：那条路径是 `upgrade::write()`，不经过脚本安装器，
+  详见 [docs/FLASHABLE.md](docs/FLASHABLE.md)。
 - 上一版镜像 `59e568a0…` 已备份到 `out/backup/`，标签 `SW-v0.2.0-nuwa-v0.2.4` 保留作回退点。
 
 ## [SW-v0.2.0-nuwa-v0.2.4] — 2026-11-11

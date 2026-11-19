@@ -92,7 +92,7 @@ bash build.sh pack       # 只重新打包（复用已有二进制）
 单独拷出来也知道是哪一版。
 
 ```
-59e568a02be1cd2881b9cbaad582d961392c76d044519eb0361604cfd35b24e4  SW-v0.2.0-nuwa-v0.2.4.img
+918089c69342f0e6bbe5716090f1a27463f4de6f3965098baa81b0c8ccc828dc  SW-v0.2.0-nuwa-v0.2.4.img
 ```
 
 ## 刷入与回退
