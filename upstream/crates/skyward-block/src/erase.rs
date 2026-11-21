@@ -150,8 +150,16 @@ fn layout(extras: &[String]) -> Result<Option<String>> {
 }
 
 /// The size of the kernel's memory pages.
+#[cfg(unix)]
 fn page_size() -> u64 {
     unsafe { libc::sysconf(libc::_SC_PAGESIZE) as u64 }
+}
+
+/// A Windows host has no block device to make a filesystem on; `make` is
+/// only reached from the device, so this is never called while packing.
+#[cfg(not(unix))]
+fn page_size() -> u64 {
+    4096
 }
 
 #[cfg(test)]

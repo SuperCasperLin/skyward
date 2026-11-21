@@ -1,5 +1,4 @@
 use anyhow::{anyhow, Result};
-use std::time::Instant;
 use skyward_config::DeviceConfig;
 use skyward_info::{Battery, Boot, Charge, Cpu, DeviceInfo, PatchLevel, Storage};
 use skyward_install::{Failure, ImageKind, Outcome, Ramdisk, Reflash, Refusal, Stage};
@@ -14,7 +13,7 @@ use skyward_ui::app::{
     Action, Adding, App, Asked, BackupAt, BackupEnd, BackupEntry, BackupJob, BackupRefusal, Choice, Clip, Damage, Data, DownloadEnd,
     DownloadJob, EraseStop, Field, FileKind, FileOp, FileRow, FileTask, FsAction, FsRow, Have, Held, Install, ItemEnd, JobEnd, Key, Keys,
     MountFailure, MountRow, Part, PartKind, PartStop, Pick, Place, Screen, SkywardEnd, SkywardJob, SkywardStage, Source, SystemChoice,
-    SystemsWork, TermEnd, Touch, UsbDrive, UsbLink, LOCK_INK_DARK, LOCK_INK_FOLLOW, SCREEN_OFF,
+    SystemsWork, TermEnd, Touch, UsbDrive, UsbLink, SCREEN_OFF,
 };
 use skyward_ui::widgets::{self, Bar, Bolt, Cap, Layer};
 use skyward_ui::{editor, fmt, pages, Canvas, Ctx, Fonts, Lang, Theme};
@@ -111,6 +110,7 @@ fn two_systems() -> Overview {
         other: Some(Other { id: "ubuntu-touch".into(), name: "Ubuntu Touch".into(), version: "24.04-1.x".into(), size: 32_000_000_000 }),
         other_starts: false,
         changed: false,
+        held: skyward_systems::Held::Recorded,
     }
 }
 
@@ -135,252 +135,15 @@ fn main() -> Result<()> {
     };
     LANG.set(lang).expect("the language is chosen once");
 
-    // The always-on clock on its own, as the panel shows it once the screen
-    // has gone off: a look at it without a phone, from the device's own
-    // config and font where they are named.
-    let looking = args.get(2).map(String::as_str);
-    if matches!(looking, Some("--aod" | "--lock" | "--lock-about" | "--bench-blur")) {
-        let near = |flag: &str| args.iter().position(|a| a == flag).and_then(|k| args.get(k + 1)).cloned();
-        let config = near("--config")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../devices/nezha.toml"));
-        let font = match near("--font").map(PathBuf::from).or_else(|| std::env::var("SKYWARD_FONT").ok().map(PathBuf::from)) {
-            Some(font) => font,
-            None => font_path()?,
-        };
-        let mono = near("--mono").map(PathBuf::from).unwrap_or_else(|| font.clone());
-        let cfg = DeviceConfig::load(&config)?;
-        let fonts = Fonts::load(&font, 0, mono)?;
-        eprintln!("font: {}", font.display());
-        let (w, h) = (cfg.display.width, cfg.display.height);
-        if looking == Some("--bench-blur") {
-            // What a lock screen that re-blurred the page every frame would
-            // cost: the page is drawn again, then shrunk, blurred twice and
-            // stretched back over 1440x3200. Measured on the device itself.
-            let mut app = App::new(Screen::Home, w, h, cfg.display.density as f32 / 160.0);
-            let info = nezha(&cfg);
-            let mut page = Canvas::new(w, h);
-            app.compose(&mut page, &fonts, &info, CLOCK, 0);
-            let n = 20;
-            let redraw = Instant::now();
-            for _ in 0..n {
-                let mut c = Canvas::new(w, h);
-                app.compose(&mut c, &fonts, &info, CLOCK, 0);
-                std::hint::black_box(&c);
-            }
-            let page_ms = redraw.elapsed().as_secs_f64() * 1000.0 / n as f64;
-            let blurred = Instant::now();
-            for _ in 0..n {
-                let mut c = page.blurred(6, 3);
-                c.saturate(1.55);
-                std::hint::black_box(&c);
-            }
-            let blur_ms = blurred.elapsed().as_secs_f64() * 1000.0 / n as f64;
-            println!("page redraw {page_ms:.2} ms/frame; blur+saturate {blur_ms:.2} ms/frame; both {:.2} ms/frame", page_ms + blur_ms);
-            // Where the 46 ms goes, so the fast path knows what to replace.
-            let stages = Instant::now();
-            for _ in 0..n {
-                let mut c = page.blurred(6, 3);
-                std::hint::black_box(&c);
-                let _ = &mut c;
-            }
-            let blur_only = stages.elapsed().as_secs_f64() * 1000.0 / n as f64;
-            let sat = Instant::now();
-            for _ in 0..n {
-                let mut c = page.blurred(6, 3);
-                c.saturate(1.55);
-                std::hint::black_box(&c);
-            }
-            let with_sat = sat.elapsed().as_secs_f64() * 1000.0 / n as f64;
-            let pane = page.blurred(6, 3);
-            let laid = Instant::now();
-            for _ in 0..n {
-                let mut c = Canvas::new(w, h);
-                c.lay(&pane, 0, 0, 1.0);
-                std::hint::black_box(&c);
-            }
-            let lay_ms = laid.elapsed().as_secs_f64() * 1000.0 / n as f64;
-            println!("  stages: blurred {blur_only:.2} ms, +saturate {with_sat:.2} ms, lay {lay_ms:.2} ms");
-            // The one-pass integer path: copy in, frost in place. Time the
-            // copy alone so the number below is the frosting only.
-            let copying = Instant::now();
-            for _ in 0..n {
-                let mut c = Canvas::new(w, h);
-                c.data.copy_from_slice(&page.data);
-                std::hint::black_box(&c);
-            }
-            let copy_ms = copying.elapsed().as_secs_f64() * 1000.0 / n as f64;
-            let frosting = Instant::now();
-            for _ in 0..n {
-                let mut c = Canvas::new(w, h);
-                c.data.copy_from_slice(&page.data);
-                c.glass(6, 3, 1.55);
-                std::hint::black_box(&c);
-            }
-            let glass_ms = frosting.elapsed().as_secs_f64() * 1000.0 / n as f64 - copy_ms;
-            println!("  one-pass glass: {glass_ms:.2} ms/frame (copy {copy_ms:.2} ms), 60 fps budget 16.67 ms");
-            for factor in [8u32, 10, 12] {
-                let at = Instant::now();
-                for _ in 0..n {
-                    let mut c = Canvas::new(w, h);
-                    c.data.copy_from_slice(&page.data);
-                    c.glass(factor, 3, 1.55);
-                    std::hint::black_box(&c);
-                }
-                println!("    glass 1/{factor}: {:.2} ms/frame", at.elapsed().as_secs_f64() * 1000.0 / n as f64 - copy_ms);
-            }
-            // What the fast pane gives away in looks: compare it with the
-            // slow one, pixel for pixel and side by side.
-            let mut slow = page.blurred(6, 3);
-            slow.saturate(1.55);
-            let mut quick = Canvas::new(w, h);
-            quick.data.copy_from_slice(&page.data);
-            quick.glass(8, 3, 1.55);
-            let (mut diff, mut peak) = (0u64, 0u32);
-            for (a, b) in slow.data.as_chunks::<4>().0.iter().zip(quick.data.as_chunks::<4>().0.iter()) {
-                for k in 0..3 {
-                    let d = (a[k] as i32 - b[k] as i32).unsigned_abs();
-                    diff += d as u64;
-                    peak = peak.max(d);
-                }
-            }
-            println!("  fast pane vs old: {:.2}/255 mean, {peak}/255 max", diff as f64 / (w as f64 * h as f64 * 3.0));
-            write_png(&out.join("pane-old.png"), &slow)?;
-            write_png(&out.join("pane-fast.png"), &quick)?;
-            for factor in [6u32, 8, 12, 16] {
-                let at = Instant::now();
-                for _ in 0..n {
-                    let mut c = page.blurred(factor, 3);
-                    c.saturate(1.55);
-                    std::hint::black_box(&c);
-                }
-                println!("  shrink 1/{factor}: {:.2} ms/frame", at.elapsed().as_secs_f64() * 1000.0 / n as f64);
-            }
-            // How much of a minute tick survives the blur at all: draw the
-            // same page one minute apart and compare their two panes.
-            let mut before = Canvas::new(w, h);
-            let mut after = Canvas::new(w, h);
-            app.compose(&mut before, &fonts, &info, "08:14", 0);
-            app.compose(&mut after, &fonts, &info, "08:15", 0);
-            let mut pane_a = before.blurred(6, 3);
-            let mut pane_b = after.blurred(6, 3);
-            pane_a.saturate(1.55);
-            pane_b.saturate(1.55);
-            let (mut sum, mut max) = (0u64, 0u32);
-            for (a, b) in pane_a.data.as_chunks::<4>().0.iter().zip(pane_b.data.as_chunks::<4>().0.iter()) {
-                for k in 0..3 {
-                    let d = (a[k] as i32 - b[k] as i32).unsigned_abs();
-                    sum += d as u64;
-                    max = max.max(d);
-                }
-            }
-            println!("a minute tick moves a blurred pixel by {:.4}/255 on average, {max}/255 at most", sum as f64 / (w as f64 * h as f64 * 3.0));
-            // The About page is different: its colour field keeps moving
-            // under the lock. Measure how much of that survives the blur,
-            // and how far apart two refreshes can stand.
-            let ppd = cfg.display.density as f32 / 160.0;
-            let mut about = App::new(Screen::About, w, h, ppd);
-            let marks = [0u64, 100, 250, 500, 1000, 2000, 4000];
-            let mut panes = Vec::new();
-            for &ms in &marks {
-                about.tick(ms);
-                let mut page = Canvas::new(w, h);
-                about.compose(&mut page, &fonts, &info, CLOCK, ms);
-                let mut pane = page.blurred(6, 3);
-                pane.saturate(1.55);
-                panes.push(pane);
-            }
-            for (i, &ms) in marks.iter().enumerate().skip(1) {
-                let (mut diff, mut peak) = (0u64, 0u32);
-                for (a, b) in panes[0].data.as_chunks::<4>().0.iter().zip(panes[i].data.as_chunks::<4>().0.iter()) {
-                    for k in 0..3 {
-                        let d = (a[k] as i32 - b[k] as i32).unsigned_abs();
-                        diff += d as u64;
-                        peak = peak.max(d);
-                    }
-                }
-                println!("about glow after {ms:4} ms: {:.2}/255 mean, {peak}/255 max", diff as f64 / (w as f64 * h as f64 * 3.0));
-            }
-            // Two panes four seconds apart, for looking at the movement.
-            write_png(&out.join("about-glow-0.png"), &panes[0])?;
-            write_png(&out.join("about-glow-4s.png"), panes.last().expect("the last pane"))?;
-            return Ok(());
-        }
-        if looking == Some("--lock-about") {
-            // One lock held over the About page while its colour field
-            // keeps turning: the glass should follow it, a frame at a time.
-            let info = nezha(&cfg);
-            let ppd = cfg.display.density as f32 / 160.0;
-            let mut app = App::new(Screen::About, w, h, ppd);
-            app.state.lang = lang;
-            app.tick(0);
-            app.lock_now(0);
-            let mut c = Canvas::new(w, h);
-            let frames = Instant::now();
-            let mut drawn = 0u32;
-            for ms in (0..=4000).step_by(16) {
-                app.tick(ms);
-                app.compose(&mut c, &fonts, &info, "08:14", ms);
-                drawn += 1;
-                if ms == 0 {
-                    let path = out.join("lock-about-0.png");
-                    write_png(&path, &c)?;
-                    println!("wrote {}", path.display());
-                }
-            }
-            app.compose(&mut c, &fonts, &info, "08:14", 4000);
-            let path = out.join("lock-about-4s.png");
-            write_png(&path, &c)?;
-            println!("wrote {}", path.display());
-            println!("whole lock frame {:.2} ms/frame over {drawn} frames, 60 fps budget 16.67 ms", frames.elapsed().as_secs_f64() * 1000.0 / drawn as f64);
-            return Ok(());
-        }
-        if looking == Some("--lock") {
-            // The battery the panel reads, in the three states it knows: 57%
-            // off the charger is the clock's blue, the same on this light
-            // pane as on the dark one below; 8% is the red the bar warns
-            // with; and 37% on the charger is the bar's green with a yellow
-            // bolt in it.
-            let locks = [
-                ("lock-slide.png", 91_000u64, false, false, false, LOCK_INK_FOLLOW, 57, Charge::Discharging, 0),
-                ("lock-code.png", 91_000, true, false, false, LOCK_INK_FOLLOW, 57, Charge::Discharging, 4),
-                ("lock-code-empty.png", 91_000, true, false, false, LOCK_INK_FOLLOW, 57, Charge::Discharging, 0),
-                ("lock-code-wrong.png", 94_000, true, true, false, LOCK_INK_FOLLOW, 57, Charge::Discharging, 4),
-                // The dark mode's own pane, and the words it gives.
-                ("lock-dark.png", 91_000, false, false, true, LOCK_INK_DARK, 57, Charge::Discharging, 0),
-                ("lock-charging.png", 91_000, false, false, false, LOCK_INK_FOLLOW, 37, Charge::Charging, 0),
-                ("lock-low.png", 91_000, false, false, false, LOCK_INK_FOLLOW, 8, Charge::Discharging, 0),
-            ];
-            for (name, now, coded, wrong, dark, ink, level, charge, typed) in locks {
-                let path = out.join(name);
-                write_png(&path, &lock(&fonts, &cfg, w, h, "08:14", now, coded, wrong, dark, ink, level, charge, typed))?;
-                println!("wrote {}", path.display());
-            }
-            return Ok(());
-        }
-        for (clock, now, name) in [("08:14", 91_000u64, "aod.png"), ("08:15", 99_000, "aod-hint-gone.png")] {
-            let path = out.join(name);
-            write_png(&path, &aod(&fonts, &cfg, w, h, clock, now))?;
-            println!("wrote {}", path.display());
-        }
-        return Ok(());
-    }
-
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let font_path = font_path()?;
-    // The monospaced face comes from the repository where it is, and is the
-    // pages' own face anywhere else, as on a phone the pages are looked at
-    // on.
-    let mono = root.join("resources/fonts/KirkMono-Regular.ttf");
-    let mono = if mono.exists() { mono } else { font_path.clone() };
-    let fonts = Fonts::load(&font_path, 0, mono)?;
+    let fonts = Fonts::load(&font_path, 0, root.join("resources/fonts/KirkMono-Regular.ttf"))?;
     eprintln!("font: {}", font_path.display());
     for (tag, min, def, max) in fonts.axes() {
         eprintln!("axis {tag}: {min}..{max} (default {def})");
     }
 
-    let config = args.iter().position(|a| a == "--config").and_then(|k| args.get(k + 1)).map(PathBuf::from);
-    let cfg = DeviceConfig::load(config.unwrap_or_else(|| root.join("devices/nezha.toml")))?;
+    let cfg = DeviceConfig::load(root.join("devices/nezha.toml"))?;
     let (w, h) = (cfg.display.width, cfg.display.height);
     let ppd = cfg.display.density as f32 / 160.0;
     let light = Theme::light(w, h, ppd);
@@ -426,19 +189,6 @@ fn main() -> Result<()> {
         app.state.pattern = pattern.to_vec();
         let path = out.join(format!("{name}.png"));
         write_png(&path, &whole_page(&mut app, &fonts, info))?;
-        println!("wrote {}", path.display());
-    }
-
-    // The keyboard with the capitals locked, as the shift key tapped twice
-    // leaves it: every letter a capital until the key is tapped again.
-    for (name, dark) in [("15-keys-caps-light", false), ("16-keys-caps-dark", true)] {
-        let mut app = App::new(Screen::Decrypt, w, h, ppd);
-        app.state.lang = lang;
-        app.state.dark = dark;
-        app.state.data = Data::Locked { user: 0, keys: Keys::Letters, checking: false };
-        app.state.layer = Layer::Locked;
-        let path = out.join(format!("{name}.png"));
-        write_png(&path, &whole_page(&mut app, &fonts, &info))?;
         println!("wrote {}", path.display());
     }
 
@@ -645,7 +395,7 @@ fn main() -> Result<()> {
     let adding = |app: &mut App, name: &str, security: Security, field: Field, choosing: bool| {
         app.state.adding = Some(Adding { name: name.into(), security, field, choosing });
     };
-    let pages: [PageShot; 179] = [
+    let pages: [PageShot; 178] = [
         ("11-install-light-locked", Screen::Install, false, &|app| {
             app.state.data = Data::Locked { user: 0, keys: Keys::Digits, checking: false };
         }),
@@ -1214,9 +964,6 @@ fn main() -> Result<()> {
             app.data_waiting(Some((0, Keys::Digits)));
             app.state.code = "123".into();
         }),
-        // Nothing typed yet: the erasing key is a round way back, not words
-        // alone on the page.
-        ("86b-decrypt-light-digits-empty", Screen::Decrypt, false, &|app| app.data_waiting(Some((0, Keys::Digits)))),
         ("87-decrypt-dark-letters", Screen::Decrypt, true, &|app| app.data_waiting(Some((10, Keys::Letters)))),
         ("88-decrypt-light-checking", Screen::Decrypt, false, &|app| {
             app.state.data = Data::Locked { user: 0, keys: Keys::Digits, checking: true };
@@ -1264,32 +1011,7 @@ fn main() -> Result<()> {
     }
 
     // The panel mid-gesture, to set beside recordings of the same moves.
-    let moments: [Moment; 31] = [
-        // A code given four digits, and the page asking for it again with
-        // two of the second telling typed.
-        ("07-set-code", Screen::SetCode, false, &|app, f| {
-            type_keys(app, f, &info, &[Cap::Char('5'), Cap::Char('1'), Cap::Char('3'), Cap::Char('9')], 200)
-        }),
-        ("07b-set-code-again", Screen::SetCode, false, &|app, f| {
-            let at = type_keys(app, f, &info, &[Cap::Char('5'), Cap::Char('1'), Cap::Char('3'), Cap::Char('9')], 200);
-            let at = type_keys(app, f, &info, &[Cap::Enter], at + 200);
-            type_keys(app, f, &info, &[Cap::Char('5'), Cap::Char('1')], at + 200)
-        }),
-        // The three ways the lock screen's words can take their colour, with
-        // the dark one chosen.
-        ("07c-lock-ink", Screen::LockInk, false, &|app, _| {
-            app.state.lock_ink = LOCK_INK_DARK;
-            app.refresh();
-            2000
-        }),
-        // A swipe in from the left edge of the first page: the cue comes up
-        // and the page stays put, though nothing waits behind it.
-        ("07d-home-edge-cue", Screen::Home, false, &|app, f| {
-            app.touch(Touch::Down(8.0, 1600.0), f, 100);
-            app.touch(Touch::Move(80.0, 1600.0), f, 120);
-            app.touch(Touch::Move(400.0, 1600.0), f, 140);
-            140
-        }),
+    let moments: [Moment; 27] = [
         ("08-about-light", Screen::About, false, &|_, _| 2000),
         ("08-about-dark", Screen::About, true, &|_, _| 2000),
         ("08-about-light-later", Screen::About, false, &|_, _| 9000),
@@ -1775,82 +1497,6 @@ fn opened(screen: Screen, w: u32, h: u32, ppd: f32) -> App {
     app.state.lang = lang();
     app.state.data = Data::Open;
     app
-}
-
-/// The always-on clock as the sleeping panel shows it: a phone left alone
-/// for a minute and a half, its pages gone dark and the clock up in their
-/// place, at the time and `now` given.
-fn aod(f: &Fonts, cfg: &DeviceConfig, w: u32, h: u32, clock: &str, now: u64) -> Canvas {
-    let mut app = App::new(Screen::Home, w, h, cfg.display.density as f32 / 160.0);
-    app.state.lang = lang();
-    app.state.aod = true;
-    // Half a minute of nothing, so the panel goes off a minute in.
-    app.state.screen_off = 1;
-    app.tick(0);
-    app.set_day(fmt::aod_date(lang(), 1_794_000_000, 0));
-    app.tick(90_000);
-    app.tick(now);
-    // The battery this frame reads, in place of the previewed phone's own:
-    // off the charger, so the clock shows the reading at rest rather than
-    // whatever the cable happens to be doing while these are drawn.
-    let mut info = nezha(cfg);
-    if let Some(b) = info.battery.as_mut() {
-        *b = Battery { level: 57, charge: Charge::Discharging, plugged: false, ..b.clone() };
-    }
-    let mut c = Canvas::new(w, h);
-    app.compose(&mut c, f, &info, clock, now);
-    c
-}
-
-/// The lock screen, as the panel shows it after going off with the lock
-/// on: the slide that opens it, or the keypad the code is typed on, the
-/// last with a code just turned down.
-#[allow(clippy::too_many_arguments)]
-fn lock(f: &Fonts, cfg: &DeviceConfig, w: u32, h: u32, clock: &str, now: u64, coded: bool, wrong: bool, dark: bool, ink: usize, level: u8, charge: Charge, typed: usize) -> Canvas {
-    let mut app = App::new(Screen::Home, w, h, cfg.display.density as f32 / 160.0);
-    app.state.lang = lang();
-    app.state.dark = dark;
-    app.state.aod = true;
-    app.state.screen_off = 1;
-    app.tick(0);
-    app.set_day(fmt::aod_date(lang(), 1_794_000_000, 0));
-    app.tick(90_000);
-    if coded {
-        // A line of the shape the code page writes; what it holds is not
-        // asked for here.
-        app.state.lock_code = "s1$6$00112233445566778899aabbccddeeff$e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_string();
-    }
-    app.state.lock = true;
-    app.state.lock_ink = ink;
-    app.lock_now(now);
-    // A finger on the dark panel lights it and leaves the lock screen up,
-    // which is how it is met.
-    app.touch(Touch::Down(w as f32 / 2.0, h as f32 * 0.75), f, now);
-    app.touch(Touch::Up, f, now);
-    // The curtain takes a moment to come up; the frame shown is the one
-    // after it has.
-    let now = now + 400;
-    app.tick(now);
-    if coded {
-        // A code set is asked for once the slide is made: the pull brings
-        // up the keypad, and four digits are typed on it.
-        app.touch(Touch::Down(w as f32 / 2.0, h as f32 * 0.70), f, now + 100);
-        app.touch(Touch::Move(w as f32 / 2.0, h as f32 * 0.45), f, now + 200);
-        app.touch(Touch::Up, f, now + 300);
-        for ch in "5139".chars().take(typed) {
-            app.lock_key(Cap::Char(ch));
-        }
-    }
-    if wrong {
-        app.code_checked(false, now);
-    }
-    let mut info = nezha(cfg);
-    if let Some(b) = info.battery.as_mut() {
-        *b = Battery { level, charge, plugged: matches!(charge, Charge::Charging | Charge::Full), ..b.clone() };
-    }
-    let mut c = Canvas::new(w, h);
-    app.compose(&mut c, f, &info, clock, now);
-    c
 }
 
 /// The full length of a page with the status bar over its top, the way a

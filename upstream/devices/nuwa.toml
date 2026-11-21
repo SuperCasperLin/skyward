@@ -199,7 +199,7 @@ repo = "SuperCasperLin/skyward"
 # 在线更新的标签就是 v0.2.4，界面上看到的始终是同一个号。发新版时两处一起递增
 # （移植版本号 v0.2.5 → 这里 0.2.5）。标签一旦发布不要改动或重建，否则已刷入的
 # 设备会比较出错乱。
-release = "0.2.4"
+release = "0.3.2"
 
 # The stock build the recovery is made on: the Chinese system's
 # OS3.0.312.0, whose full update package on the phone maker's own download

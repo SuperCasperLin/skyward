@@ -47,6 +47,8 @@ pub enum Screen {
     /// or which is a file chosen in a place, and how it went.
     Installing,
     About,
+    /// The port's release notes, read from the About page.
+    ChangeLog,
     Specs,
     /// How long the screen stays on with nothing touched.
     ScreenOff,
@@ -2258,8 +2260,11 @@ const MORPH_CANCEL_BLUR_DP: f32 = 8.0;
 const MORPH_BODY_MS: (u64, u64) = (380, 120);
 /// A row a finger lands on starts darkening this long after, as the stock
 /// settings' rows do; a finger moving on before then scrolls the page, and
-/// the row never shows pressed.
-const ROW_PRESS_DELAY_MS: u64 = 90;
+/// the row never shows pressed. Shortened from 90 ms so a light, quick tap
+/// shows feedback sooner, while still leaving a window to tell a tap from a
+/// scroll (a finger that moves on inside this time still scrolls, never
+/// darkens).
+const ROW_PRESS_DELAY_MS: u64 = 60;
 /// The spring a row held down darkens on, and fades back on once let go:
 /// critically damped, fitted to frames of the stock settings on a Xiaomi
 /// 17 Ultra.
@@ -6332,6 +6337,14 @@ impl App {
             Action::Type(cap) if self.screen() == Screen::Terminal => return self.term_typed(cap, now),
             Action::Type(cap) if self.screen() == Screen::Editor => self.edit_typed(cap, now),
             Action::Type(cap) if self.screen() == Screen::SetCode => return self.code_typed(cap),
+            // The decrypt keypad shares the lock screen's keys, so give it
+            // the lock screen's feel too: every key, Enter included, answers
+            // with the same short tap of the motor.
+            Action::Type(cap) if self.screen() == Screen::Decrypt => {
+                let mut fx = self.buzz();
+                fx.extend(self.type_key(cap, now));
+                return fx;
+            }
             Action::Type(cap) => return self.type_key(cap, now),
             Action::ForgetCode => self.forget_code(now),
             Action::TermKey(key) if self.screen() == Screen::Editor => {
@@ -7456,7 +7469,8 @@ impl App {
 
     /// What a swipe-to-confirm control slid to its end does.
     fn confirmed(&mut self, which: Confirm, now: u64) -> Vec<Effect> {
-        let (l, mut fx) = (self.state.lang, Vec::new());
+        let l = self.state.lang;
+        let mut fx = Vec::new();
         match which {
             Confirm::Reboot => fx.push(Effect::Reboot(TARGETS[self.state.reboot])),
             Confirm::Wipe => {
@@ -7589,7 +7603,17 @@ impl App {
                 }
             }
         }
-        fx
+        // A swipe that goes through feels like the lock screen's slide to
+        // unlock: the motor taps once. Every confirm uses this one function,
+        // so all of them share the feel. A swipe that is turned down (a
+        // message, no effect) stays silent, as it did before.
+        if !fx.is_empty() {
+            let mut felt = self.buzz();
+            felt.append(&mut fx);
+            felt
+        } else {
+            fx
+        }
     }
 
     /// Work the control the keys are on, as touching it does. The
@@ -8106,6 +8130,7 @@ mod tests {
             Screen::Mount,
             Screen::Install,
             Screen::Choose(Place::Storage),
+            Screen::ChangeLog,
             Screen::Specs,
             Screen::ScreenOff,
             Screen::Search,
@@ -8886,7 +8911,7 @@ mod tests {
         app.set_update(Standing::Waiting);
         assert_eq!(tap(&mut app, &f, &i, Action::Open(Screen::Update)), vec![Effect::ReadUpdate], "the page reads where the update stands");
         assert_eq!(app.screen(), Screen::Update);
-        assert_eq!(swipe(&mut app, &f, &i, Confirm::Merge), vec![Effect::Merge]);
+        assert_eq!(swipe(&mut app, &f, &i, Confirm::Merge), vec![Effect::Haptic, Effect::Merge]);
         assert_eq!(app.state.update, Standing::Merging(0.0), "the page turns to the merge at once");
         assert!(app.frame(&f, &i).hits.is_empty(), "nothing to swipe while it merges");
         app.set_update(Standing::Merging(0.5));
@@ -9432,7 +9457,7 @@ mod tests {
         app.touch(Touch::Move(track.x + track.w / 2.0, y), &f, 0);
         app.touch(Touch::Move(track.x + track.w, y), &f, 0);
         let fx = app.touch(Touch::Up, &f, 0);
-        assert_eq!(fx, vec![Effect::Reboot(Target::Bootloader)]);
+        assert_eq!(fx, vec![Effect::Haptic, Effect::Reboot(Target::Bootloader)]);
         assert_eq!(app.state.confirm, 0.0, "the knob springs back");
     }
 
@@ -9580,7 +9605,7 @@ mod tests {
         let y = track.centre().1 - app.top().1;
         app.touch(Touch::Down(track.x + track.h / 2.0, y), &f, 1000);
         app.touch(Touch::Move(track.x + track.w, y), &f, 1000);
-        assert_eq!(app.touch(Touch::Up, &f, 1000), vec![Effect::Flash { partition: "boot", pick: Pick::Both }]);
+        assert_eq!(app.touch(Touch::Up, &f, 1000), vec![Effect::Haptic, Effect::Flash { partition: "boot", pick: Pick::Both }]);
         assert_eq!(app.state.install, Install::Flashing { partition: "boot", stage: None });
         app.install(Event::Progress(Stage::Flashing { done: 10, total: 40 }), 1000);
         assert_eq!(app.state.install, Install::Flashing { partition: "boot", stage: Some(Stage::Flashing { done: 10, total: 40 }) });
@@ -9648,7 +9673,7 @@ mod tests {
         let fastboot = TARGETS.iter().position(|t| *t == Target::Fastboot).unwrap();
         tap(&mut app, &f, &i, Action::RebootTarget(fastboot));
         assert_eq!(app.state.reboot, fastboot);
-        assert_eq!(swipe(&mut app, &f, &i, Confirm::Reboot), vec![Effect::Reboot(Target::Fastboot)]);
+        assert_eq!(swipe(&mut app, &f, &i, Confirm::Reboot), vec![Effect::Haptic, Effect::Reboot(Target::Fastboot)]);
     }
 
     /// Press `key` and let it go.
@@ -9845,7 +9870,7 @@ mod tests {
         app.key(Key::Power, 3000);
         app.tick(3000 + SLIDE_MS * 2);
         assert_eq!(app.state.confirm, 1.0, "the knob stops at the end");
-        assert_eq!(app.key_up(Key::Power, 3000 + SLIDE_MS * 2), vec![Effect::Reboot(TARGETS[0])], "let go there, it confirms");
+        assert_eq!(app.key_up(Key::Power, 3000 + SLIDE_MS * 2), vec![Effect::Haptic, Effect::Reboot(TARGETS[0])], "let go there, it confirms");
         assert_eq!(app.state.confirm, 0.0);
         app.key(Key::Power, 6000);
         app.tick(6000 + SLIDE_MS);
@@ -9943,7 +9968,7 @@ mod tests {
         }
         assert_eq!(app.state.code, "2580");
         light_on(&mut app, &f, &i, Stop::Hit(Action::Type(Cap::Enter)));
-        assert_eq!(press(&mut app, Key::Power, 0), vec![Effect::Unlock { user: 0, code: "2580".into() }]);
+        assert_eq!(press(&mut app, Key::Power, 0), vec![Effect::Haptic, Effect::Unlock { user: 0, code: "2580".into() }]);
     }
 
     #[test]
@@ -10047,7 +10072,7 @@ mod tests {
         let mut app = App::new(Screen::CantStart, W, H, PPD);
         app.set_asked(Asked { reason: Some("RescueParty".into()), ..Asked::default() });
         assert_eq!(tap(&mut app, &f, &i, Action::RebootTo(Target::System)), vec![Effect::Reboot(Target::System)]);
-        assert_eq!(swipe(&mut app, &f, &i, Confirm::FactoryReset), vec![Effect::FactoryReset]);
+        assert_eq!(swipe(&mut app, &f, &i, Confirm::FactoryReset), vec![Effect::Haptic, Effect::FactoryReset]);
         assert_eq!(tap(&mut app, &f, &i, Action::Dismiss), vec![Effect::Dismiss]);
         assert_eq!(app.screen(), Screen::Home);
         app.key(Key::Back, 0);
@@ -10099,16 +10124,16 @@ mod tests {
         }
         let parts = vec![Wipe::AppData, Wipe::Media, Wipe::AppCaches, Wipe::SystemCaches, Wipe::Art, Wipe::Logs, Wipe::Updates];
         assert_eq!(chosen(&app), parts, "every part the page lists can be chosen with the others");
-        assert_eq!(swipe(&mut app, &f, &i, Confirm::Wipe), vec![Effect::Wipe(parts)], "in the order listed");
+        assert_eq!(swipe(&mut app, &f, &i, Confirm::Wipe), vec![Effect::Haptic, Effect::Wipe(parts)], "in the order listed");
         tap(&mut app, &f, &i, Action::WipeItem(Wipe::All));
         assert_eq!(chosen(&app), [Wipe::All], "everything takes the parts in");
         tap(&mut app, &f, &i, Action::WipeItem(Wipe::Art));
         assert_eq!(chosen(&app), [Wipe::Art], "a part on its own leaves everything out");
-        assert_eq!(swipe(&mut app, &f, &i, Confirm::Wipe), vec![Effect::Wipe(vec![Wipe::Art])]);
+        assert_eq!(swipe(&mut app, &f, &i, Confirm::Wipe), vec![Effect::Haptic, Effect::Wipe(vec![Wipe::Art])]);
         tap(&mut app, &f, &i, Action::WipeItem(Wipe::Art));
         assert!(chosen(&app).is_empty(), "tapped again, a part is left out");
         tap(&mut app, &f, &i, Action::WipeItem(Wipe::All));
-        assert_eq!(swipe(&mut app, &f, &i, Confirm::Wipe), vec![Effect::Wipe(vec![Wipe::All])]);
+        assert_eq!(swipe(&mut app, &f, &i, Confirm::Wipe), vec![Effect::Haptic, Effect::Wipe(vec![Wipe::All])]);
     }
 
     #[test]
@@ -10122,7 +10147,7 @@ mod tests {
         assert!(offered(&mut app));
         tap(&mut app, &f, &i, Action::WipeItem(Wipe::Cache));
         tap(&mut app, &f, &i, Action::WipeItem(Wipe::Media));
-        assert_eq!(swipe(&mut app, &f, &i, Confirm::Wipe), vec![Effect::Wipe(vec![Wipe::Media, Wipe::Cache])], "in the order listed");
+        assert_eq!(swipe(&mut app, &f, &i, Confirm::Wipe), vec![Effect::Haptic, Effect::Wipe(vec![Wipe::Media, Wipe::Cache])], "in the order listed");
     }
 
     #[test]
@@ -10186,7 +10211,7 @@ mod tests {
         let y = track.centre().1 - app.top().1;
         app.touch(Touch::Down(track.x + track.h / 2.0, y), &f, 1000);
         app.touch(Touch::Move(track.x + track.w, y), &f, 1000);
-        assert_eq!(app.touch(Touch::Up, &f, 1000), vec![Effect::Install]);
+        assert_eq!(app.touch(Touch::Up, &f, 1000), vec![Effect::Haptic, Effect::Install]);
         assert_eq!(app.state.install, Install::Updating { version: Some("OS3.0.306.0.WMACNXM".into()), stage: None, overwriting: false });
         app.key(Key::Back, 1000);
         assert_eq!(app.screen(), Screen::Installing, "an update being written keeps the page");
@@ -10214,7 +10239,7 @@ mod tests {
         let y = track.centre().1 - app.top().1;
         app.touch(Touch::Down(track.x + track.h / 2.0, y), &f, 1000);
         app.touch(Touch::Move(track.x + track.w, y), &f, 1000);
-        assert_eq!(app.touch(Touch::Up, &f, 1000), vec![Effect::Install]);
+        assert_eq!(app.touch(Touch::Up, &f, 1000), vec![Effect::Haptic, Effect::Install]);
         assert_eq!(app.state.install, Install::Scripting { stage: None, running: false });
         app.install(Event::Running, 1000);
         for line in ["- Flashing boot", " ", "- Done"] {
@@ -10433,7 +10458,7 @@ mod tests {
         // The owner's files open first; another user's still wait.
         app.data_waiting(Some((10, Keys::Digits)));
         let first = Effect::Backup { parts: [true, true, false, true], place: Place::Storage, compress: false, verify: true };
-        assert_eq!(swipe(&mut app, &f, &i, Confirm::Backup), vec![first]);
+        assert_eq!(swipe(&mut app, &f, &i, Confirm::Backup), vec![Effect::Haptic, first]);
         tap(&mut app, &f, &i, Action::BackupPart(2));
         assert!(swipe(&mut app, &f, &i, Confirm::Backup).is_empty(), "the data partition is backed up only with every user's files open");
         app.data_waiting(None);
@@ -10445,7 +10470,7 @@ mod tests {
         assert!(swipe(&mut app, &f, &i, Confirm::Backup).is_empty(), "no drive is plugged in");
         app.set_usb_drive(Some(UsbDrive::Shown));
         let second = Effect::Backup { parts: [false, true, true, true], place: Place::UsbDrive, compress: true, verify: false };
-        assert_eq!(swipe(&mut app, &f, &i, Confirm::Backup), vec![second]);
+        assert_eq!(swipe(&mut app, &f, &i, Confirm::Backup), vec![Effect::Haptic, second]);
         for k in 1..4 {
             tap(&mut app, &f, &i, Action::BackupPart(k));
         }
@@ -10492,7 +10517,7 @@ mod tests {
         tap(&mut app, &f, &i, Action::RestorePart(1));
         assert_eq!(app.state.restore.as_ref().map(|r| r.1), Some([true, false, false, true]));
         let name = fmt::stamp(1_792_348_260, 0);
-        assert_eq!(swipe(&mut app, &f, &i, Confirm::Restore), vec![Effect::Restore {
+        assert_eq!(swipe(&mut app, &f, &i, Confirm::Restore), vec![Effect::Haptic, Effect::Restore {
             place: Place::Storage,
             name: name.clone(),
             parts: [true, false, false, true]
@@ -10515,7 +10540,7 @@ mod tests {
         assert_eq!(app.deadline(0), Some(TOAST_MS), "the page says to decrypt first");
         app.data_waiting(None);
         let fx = swipe(&mut app, &f, &i, Confirm::Restore);
-        assert!(matches!(&fx[..], [Effect::Restore { parts: [false, false, true, false], .. }]), "{fx:?}");
+        assert!(matches!(&fx[..], [Effect::Haptic, Effect::Restore { parts: [false, false, true, false], .. }]), "{fx:?}");
     }
 
     #[test]
@@ -10544,7 +10569,7 @@ mod tests {
         tap(&mut app, &f, &i, Action::OpenBackup(0));
         assert!(app.frame(&f, &i).hits.iter().all(|h| h.action != Action::Confirm(Confirm::DeleteBackup)), "asked for first");
         tap(&mut app, &f, &i, Action::AskDelete);
-        assert_eq!(swipe(&mut app, &f, &i, Confirm::DeleteBackup), vec![Effect::DeleteBackup { place: Place::Storage, name: entry.name }]);
+        assert_eq!(swipe(&mut app, &f, &i, Confirm::DeleteBackup), vec![Effect::Haptic, Effect::DeleteBackup { place: Place::Storage, name: entry.name }]);
         assert!(app.backup_deleted(Err("Permission denied".into()), 0).is_empty());
         assert_eq!(app.screen(), Screen::RestoreBackup, "not deleted, the page stays and says why");
         assert_eq!(app.backup_deleted(Ok(()), 0), vec![Effect::FindBackups { storage: true, usb: false }]);
@@ -10612,7 +10637,7 @@ mod tests {
         assert!(swipe(&mut app, &f, &i, Confirm::Slot).is_empty());
         assert_eq!(app.deadline(0), Some(TOAST_MS), "B starts next already");
         tap(&mut app, &f, &i, Action::PickSlot(Slot::A));
-        assert_eq!(swipe(&mut app, &f, &i, Confirm::Slot), vec![Effect::SetSlot(Slot::A)]);
+        assert_eq!(swipe(&mut app, &f, &i, Confirm::Slot), vec![Effect::Haptic, Effect::SetSlot(Slot::A)]);
         let switched = BootSlots { active: Slot::A, bootable: [true, true], ..held };
         app.slot_switched(Ok(switched), 0);
         assert_eq!((app.state.boot_slots.clone(), app.state.next_slot), (Some(Ok(switched)), None), "the pick is done with");
@@ -10636,6 +10661,7 @@ mod tests {
             other: Some(skyward_systems::Other { id: "ubuntu".into(), name: "Ubuntu Touch".into(), version: "24.04".into(), size: 16 << 30 }),
             other_starts: false,
             changed: false,
+            held: skyward_systems::Held::Recorded,
         }
     }
 
@@ -10676,7 +10702,7 @@ mod tests {
         let mut app = systems_page(&f, &i, two_systems());
         assert!(!swipes(&mut app, &f, &i), "the main system starts already");
         tap(&mut app, &f, &i, Action::PickSystem(Who::Other));
-        assert_eq!(swipe(&mut app, &f, &i, Confirm::SwitchSystem), vec![Effect::SwitchSystem(Who::Other)]);
+        assert_eq!(swipe(&mut app, &f, &i, Confirm::SwitchSystem), vec![Effect::Haptic, Effect::SwitchSystem(Who::Other)]);
         assert_eq!((app.state.systems_work, app.state.system_pick), (Some(SystemsWork::Switching(Who::Other)), None));
         assert!(app.frame(&f, &i).hits.is_empty(), "nothing to tap while the boot partitions are written");
         // The card tapped darkens and comes back, as a row of a list does.
@@ -10687,7 +10713,7 @@ mod tests {
         assert_eq!(app.state.systems_work, None);
         app.set_systems(Ok(Overview { other_starts: true, ..two_systems() }));
         tap(&mut app, &f, &i, Action::PickSystem(Who::Installed));
-        assert_eq!(swipe(&mut app, &f, &i, Confirm::SwitchSystem), vec![Effect::SwitchSystem(Who::Installed)]);
+        assert_eq!(swipe(&mut app, &f, &i, Confirm::SwitchSystem), vec![Effect::Haptic, Effect::SwitchSystem(Who::Installed)]);
         app.set_systems(Ok(two_systems()));
         tap(&mut app, &f, &i, Action::PickSystem(Who::Other));
         app.key(Key::Back, 0);
@@ -10702,7 +10728,7 @@ mod tests {
         assert!(!swipes(&mut app, &f, &i), "nothing to swipe");
         app.set_systems(Ok(Overview { other_starts: true, ..two_systems() }));
         tap(&mut app, &f, &i, Action::PickSystem(Who::Installed));
-        assert_eq!(swipe(&mut app, &f, &i, Confirm::SwitchSystem), vec![Effect::SwitchSystem(Who::Installed)], "back to the main system to merge it");
+        assert_eq!(swipe(&mut app, &f, &i, Confirm::SwitchSystem), vec![Effect::Haptic, Effect::SwitchSystem(Who::Installed)], "back to the main system to merge it");
     }
 
     #[test]
@@ -10713,7 +10739,7 @@ mod tests {
         app.state.data = Data::Open;
         app.refresh();
         tap(&mut app, &f, &i, Action::AskDelete);
-        assert_eq!(swipe(&mut app, &f, &i, Confirm::RemoveSystem), vec![Effect::RemoveSystem]);
+        assert_eq!(swipe(&mut app, &f, &i, Confirm::RemoveSystem), vec![Effect::Haptic, Effect::RemoveSystem]);
         assert_eq!((app.state.systems_work, app.state.asking_delete), (Some(SystemsWork::Removing), false));
         app.set_systems(Ok(Overview { other: None, ..two_systems() }));
         assert_eq!(app.state.systems_work, None);
@@ -10735,7 +10761,7 @@ mod tests {
         let y = track.centre().1 - app.top().1;
         app.touch(Touch::Down(track.x + track.h / 2.0, y), &f, 1000);
         app.touch(Touch::Move(track.x + track.w, y), &f, 1000);
-        assert_eq!(app.touch(Touch::Up, &f, 1000), vec![Effect::InstallSystem { size: 8 << 30 }]);
+        assert_eq!(app.touch(Touch::Up, &f, 1000), vec![Effect::Haptic, Effect::InstallSystem { size: 8 << 30 }]);
         assert_eq!(app.state.install, Install::Systeming { name: "Ubuntu Touch".into(), stage: None });
         app.install(Event::Progress(Stage::Root { done: 1 << 30, total: 6 << 30 }), 1000);
         assert_eq!(app.state.install, Install::Systeming { name: "Ubuntu Touch".into(), stage: Some(Stage::Root { done: 1 << 30, total: 6 << 30 }) });
@@ -10819,7 +10845,7 @@ mod tests {
         tap(&mut app, &f, &i, Action::Type(Cap::Backspace));
         assert_eq!(app.state.code, "123");
         let fx = tap(&mut app, &f, &i, Action::Type(Cap::Enter));
-        assert_eq!(fx, vec![Effect::Unlock { user: 0, code: "123".into() }]);
+        assert_eq!(fx, vec![Effect::Haptic, Effect::Unlock { user: 0, code: "123".into() }]);
         assert_eq!(app.state.code, "", "what was typed is gone once it is sent");
         assert_eq!(app.state.data, Data::Locked { user: 0, keys: Keys::Digits, checking: true });
         assert!(!keys_shown(&mut app, &f, &i), "nothing more is taken while it is checked");
@@ -10852,7 +10878,7 @@ mod tests {
         let (f, i) = (fonts(), info());
         let mut app = App::new(Screen::Decrypt, W, H, PPD);
         app.data_waiting(Some((0, Keys::Digits)));
-        assert!(tap(&mut app, &f, &i, Action::Type(Cap::Enter)).is_empty());
+        assert_eq!(tap(&mut app, &f, &i, Action::Type(Cap::Enter)), vec![Effect::Haptic], "the empty key is still felt");
         assert_eq!(app.deadline(0), Some(TOAST_MS), "the page says to type one first");
     }
 
@@ -11499,10 +11525,10 @@ mod tests {
         assert_eq!(toast(&app), Some("请先在「解密」中打开 data 分区"));
         app.state.data = Data::Locked { user: 0, keys: Keys::Digits, checking: false };
         app.refresh();
-        assert_eq!(swipe(&mut app, &f, &i, Confirm::Relabel), vec![Effect::Relabel], "open, though a user has yet to unlock");
+        assert_eq!(swipe(&mut app, &f, &i, Confirm::Relabel), vec![Effect::Haptic, Effect::Relabel], "open, though a user has yet to unlock");
         app.state.data = Data::Open;
         app.refresh();
-        assert_eq!(swipe(&mut app, &f, &i, Confirm::Relabel), vec![Effect::Relabel]);
+        assert_eq!(swipe(&mut app, &f, &i, Confirm::Relabel), vec![Effect::Haptic, Effect::Relabel]);
         app.relabel_started();
         assert!(!app.frame(&f, &i).back, "no going back while it works");
         app.key(Key::Back, 0);
@@ -11548,7 +11574,7 @@ mod tests {
         tap(&mut app, &f, &i, Action::ChooseFs(FsChoice::Remake(0)));
         assert_eq!(app.state.fs_action, FsAction::Remake("f2fs".into()));
         let remake = Effect::Filesystem { name: "cache".into(), action: FsAction::Remake("f2fs".into()) };
-        assert_eq!(swipe(&mut app, &f, &i, Confirm::Filesystem), vec![remake]);
+        assert_eq!(swipe(&mut app, &f, &i, Confirm::Filesystem), vec![Effect::Haptic, remake]);
         app.part_work_started(PartKind::Remake("f2fs".into()), false);
         assert_eq!(app.screen(), Screen::PartWork);
         app.part_listed(vec!["cache".into()]);
@@ -11579,7 +11605,7 @@ mod tests {
         app.state.data = Data::Open;
         app.refresh();
         let repair = Effect::Filesystem { name: "data".into(), action: FsAction::Repair };
-        assert_eq!(swipe(&mut app, &f, &i, Confirm::Filesystem), vec![repair]);
+        assert_eq!(swipe(&mut app, &f, &i, Confirm::Filesystem), vec![Effect::Haptic, repair]);
         app.part_work_started(PartKind::Repair, false);
         app.part_listed(vec!["data".into()]);
         app.part_at(0);
@@ -12128,7 +12154,7 @@ mod tests {
         hold_entry(&mut app, &f, &i, 1);
         assert!(app.frame(&f, &i).hits.iter().all(|h| h.action != Action::Confirm(Confirm::DeleteEntry)));
         tap(&mut app, &f, &i, Action::AskDelete);
-        assert_eq!(swipe(&mut app, &f, &i, Confirm::DeleteEntry), vec![Effect::Delete("/sdcard/a.zip".into())]);
+        assert_eq!(swipe(&mut app, &f, &i, Confirm::DeleteEntry), vec![Effect::Haptic, Effect::Delete("/sdcard/a.zip".into())]);
         app.file_job_started(FileTask::Delete { path: "/sdcard/a.zip".into() });
         assert_eq!(app.screen(), Screen::FileJob);
         assert_eq!(tap(&mut app, &f, &i, Action::StopJob), vec![Effect::StopJob]);

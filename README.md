@@ -21,7 +21,7 @@ recovery 变成**原生支持 data 解密**的 Skyward。
 
 | | |
 |---|---|
-| 当前版本 | `SW-v0.2.0-nuwa-v0.2.4`（上游基线 v0.2.0，本移植第 6 版） |
+| 当前版本 | `SW-v0.3.1-nuwa-v0.3.2`（上游基线 v0.3.1；v0.2.0 基线的各版见 [CHANGELOG](CHANGELOG.md)） |
 | 适用机型 | 小米 13 Pro（`nuwa`），已验证 OS3.0.312.0.WMBCNXM / Android 16 / SDK 36 |
 | 系统要求 | 已解锁 Bootloader；A/B 分区；独立 `recovery` 分区 |
 | 移植 | Casper Lin |
@@ -54,7 +54,7 @@ recovery 镜像当底座**——保留原厂的 init、adbd、SELinux 策略和�
 | **锁屏状态机（v0.2.4）** | 首次进入 Recovery 也先上锁（设了密码就要输），不再直接进功能界面；按电源键是**上锁且保持亮屏**，停在锁屏页，由息屏超时自动进 AOD（或再按一次主动熄屏）。无触摸屏的设备会自动撤掉开机锁 | `crates/skyward-ui`、`crates/skyward` |
 | **首页侧边返回** | 每一页都认从屏幕边缘划入的返回手势，包括首页：首页没有下一页可回，箭头照样浮起、拉到阈值照样震一下、松手照样缩回，但页面静止不动；竖直拖动仍照常滚动 | `crates/skyward-ui` |
 | **大写锁定** | 双击 Shift 锁定大写（再双击解除），锁定态 Shift 键多一条横杠 | `crates/skyward-ui` |
-| **版本号** | About 页显示 `SW-v0.2.0-nuwa-v0.2.4`；更新检查仍用上游版本号 | `crates/skyward-info` |
+| **版本号** | About 页显示 `SW-v0.3.1-nuwa-v0.3.2`；更新检查查自有仓库 `SuperCasperLin/skyward` 的 release（发行号与移植版号尾段一致） | `crates/skyward-info`、`crates/skyward-net` |
 | **署名** | About 页在原作者之下加一行移植署名；许可页加「修改说明」（原作者版权行不改动） | `crates/skyward-ui` |
 | **Windows 构建** | 两处可移植性补丁，见 [docs/PATCHES.md](docs/PATCHES.md) | `crates/skyward-bootimg`、`crates/skyward-config` |
 
@@ -128,7 +128,8 @@ fastboot reboot recovery
   （1 Hz 轮询）。功耗高于手机原生 AOD，但 recovery 场景下可以忽略。
 - **只做了一款 AOD 样式**（时间 + 日期 + 电量），没有上游某些移植版的多种时钟样式；
   防烧屏靠每分钟的像素位移，不是靠换样式。
-- **更新检查指向上游**：检查的是 `kirklin/skyward` 的 release，不是本移植的版本。
+- **在线更新依赖自有 release**：检查的是 `SuperCasperLin/skyward` 的 release；发版时需同时
+  更新 tag 与配置里的 `release` 号，否则会一直显示「已是最新」。
 
 ## 许可与致谢
 
@@ -150,7 +151,7 @@ About 页的署名也按同样的顺序排列：`© 2026 Kirk Lin` 在上，`© 
 ## English
 
 A third-party port of [kirklin/skyward](https://github.com/kirklin/skyward) for the
-Xiaomi 13 Pro (`nuwa`), version `SW-v0.2.0-nuwa-v0.2.1`.
+Xiaomi 13 Pro (`nuwa`), version `SW-v0.3.1-nuwa-v0.3.2`.
 
 Skyward reuses the stock recovery image as a substrate — keeping its init, adbd, SELinux
 policy and vendor `.so` files — and replaces only `system/bin/recovery` with a Rust program

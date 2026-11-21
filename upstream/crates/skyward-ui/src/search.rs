@@ -78,6 +78,12 @@ pub const ENTRIES: &[Entry] = &[
     entry(["启动槽位", "啟動槽位", "Boot slot"], ["重启", "重新啟動", "Reboot"], Screen::Slot, &["qidongcaowei", "qdcw", "caowei", "cw", "slot"]),
     entry(["关于本机", "關於手機", "About phone"], SETTINGS, Screen::About, &["guanyubenji", "gybj", "about", "banben", "version"]),
     entry(
+        ["更新日志", "更新日誌", "Changelog"],
+        ["设置 > 关于本机", "設定 > 關於手機", "Settings > About phone"],
+        Screen::ChangeLog,
+        &["gengxinrizhi", "gxrz", "changelog", "release", "banbenlishi", "versionhistory"],
+    ),
+    entry(
         ["Skyward 更新", "Skyward 更新", "Skyward update"],
         SETTINGS,
         Screen::SkywardUpdate,
@@ -201,7 +207,7 @@ mod tests {
     #[test]
     fn skyward_is_updated_from_its_own_page() {
         assert_eq!(titles("skyward"), ["Skyward 更新"]);
-        assert_eq!(titles("gengxin"), ["系统更新", "Skyward 更新"]);
+        assert_eq!(titles("gengxin"), ["更新日志", "系统更新", "Skyward 更新"]);
         assert!(find_on("skyward", Lang::Hans, |s| s != Screen::SkywardUpdate).is_empty());
     }
 

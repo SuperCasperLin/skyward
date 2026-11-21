@@ -24,7 +24,7 @@ use skyward_install::{Outcome, Reflash, Refusal, Stage};
 use skyward_net::download::Progress;
 use skyward_net::supplicant::Security;
 use skyward_net::wlan::{Bands, Network, Power, Stage as Joining};
-use skyward_systems::Who;
+use skyward_systems::{Held, Who};
 use skyward_vab::{Slot, Standing};
 use std::path::Path;
 
@@ -72,6 +72,7 @@ pub fn render(screen: Screen, cx: &Ctx) -> Frame {
         Screen::Choose(place) => choose(cx, place),
         Screen::Installing => installing(cx),
         Screen::About => about(cx),
+        Screen::ChangeLog => changelog(cx),
         Screen::Specs => specs(cx),
         Screen::ScreenOff => screen_off(cx),
         Screen::Search => search(cx),
@@ -167,6 +168,7 @@ const REBOOT: Text = ["重启", "重新啟動", "Reboot"];
 const ABOUT: Text = ["关于本机", "關於手機", "About phone"];
 const SPECS: Text = ["全部参数与信息", "全部規格與資訊", "All specs"];
 const LOGS: Text = ["导出日志", "匯出記錄", "Export logs"];
+const CHANGELOG: Text = ["更新日志", "更新日誌", "Changelog"];
 const SCREEN_TIMEOUT: Text = ["息屏时间", "螢幕自動關閉", "Screen timeout"];
 const AOD: Text = ["息屏显示", "息屏顯示", "Always-on display"];
 const LOCK: Text = ["锁屏", "鎖屏", "Lock screen"];
@@ -581,6 +583,31 @@ pub fn about(cx: &Ctx) -> Frame {
     Frame { header: false, hero: Some(art), ..Frame::new(t, canvas, out, cx.state.lang.pick(ABOUT), summary_top) }
 }
 
+/// The port's release notes, newest first, read from the About page. Each
+/// version is a section and a paragraph, the same building blocks the
+/// licence pages use, so the whole thing is one scrollable page.
+pub fn changelog(cx: &Ctx) -> Frame {
+    let (t, f, l) = (cx.t, cx.f, cx.state.lang);
+    let mut c = long_page(cx);
+    let mut top = t.m.content_top;
+    let note = l.pick([
+        "这里是本移植各版本的改动摘要，最新在最前。完整记录见项目仓库的 CHANGELOG。",
+        "這裡是本移植各版本的改動摘要，最新在最前。完整記錄見專案倉庫的 CHANGELOG。",
+        "A summary of what changed in each build of this port, newest first. The full record is in the project's CHANGELOG.",
+    ]);
+    top = widgets::paragraph(&mut c, t, f, top, note);
+    for (k, entry) in crate::changelog::ENTRIES.iter().enumerate() {
+        let heading = l.pick(entry.heading);
+        if k == 0 {
+            top = widgets::section_first(&mut c, t, f, top + t.m.dp(8.0), heading);
+        } else {
+            top = widgets::section(&mut c, t, f, top + t.m.dp(12.0), heading);
+        }
+        top = widgets::paragraph(&mut c, t, f, top, l.pick(entry.body));
+    }
+    Frame::new(t, fit(c, t, top), Vec::new(), l.pick(CHANGELOG), t.m.content_top)
+}
+
 const MODEL: Text = ["设备型号", "裝置型號", "Model"];
 const PROCESSOR: Text = ["处理器", "處理器", "Processor"];
 const RAM: Text = ["运行内存", "記憶體", "RAM"];
@@ -632,8 +659,16 @@ fn about_cards(cx: &Ctx, c: &mut Canvas) -> (Vec<Hit>, f32, f32) {
         specs.push((l.pick(RESOLUTION), fmt::panel(p)));
     }
     let y = widgets::spec_card(c, t, f, summary.bottom + m.card_gap, &fmt::model_lines(&i.model), &specs, &tone);
-    let links = widgets::list_toned(c, t, f, y + m.card_gap, &[Row::new(l.pick(SPECS)), Row::new(l.pick(LOGS))], &tone);
-    out.extend(hits(&links.rows, &[Action::Open(Screen::Specs), Action::Open(Screen::Logs)]));
+    let links = widgets::list_toned(c, t, f, y + m.card_gap, &[
+        Row::new(l.pick(SPECS)),
+        Row::new(l.pick(CHANGELOG)),
+        Row::new(l.pick(LOGS)),
+    ], &tone);
+    out.extend(hits(&links.rows, &[
+        Action::Open(Screen::Specs),
+        Action::Open(Screen::ChangeLog),
+        Action::Open(Screen::Logs),
+    ]));
     (out, summary.rows[0].y, links.bottom)
 }
 
@@ -2104,16 +2139,17 @@ pub fn restore_backup(cx: &Ctx) -> Frame {
                 }
                 // The boot partitions' vbmeta checks the system's: one of
                 // another version without the other may not start.
-                if let (Some(was), Some(now)) = (&held.system, &i.os_version) {
-                    if was != now && chosen[0] != chosen[1] {
-                        let warn = tr!(
-                            l,
-                            "该备份来自 {was}，本机当前为 {now}。仅恢复启动分区或系统分区中的一项，可能导致无法开机。",
-                            "這份備份來自 {was}，本機目前為 {now}。僅還原啟動分割區或系統分割區中的一項，可能導致無法開機。",
-                            "This backup is from {was}, and this phone runs {now}. Restoring only one of the boot and system partitions may keep the phone from starting."
-                        );
-                        y = widgets::footnote(&mut c, t, f, y, &warn);
-                    }
+                if let (Some(was), Some(now)) = (&held.system, &i.os_version)
+                    && was != now
+                    && chosen[0] != chosen[1]
+                {
+                    let warn = tr!(
+                        l,
+                        "该备份来自 {was}，本机当前为 {now}。仅恢复启动分区或系统分区中的一项，可能导致无法开机。",
+                        "這份備份來自 {was}，本機目前為 {now}。僅還原啟動分割區或系統分割區中的一項，可能導致無法開機。",
+                        "This backup is from {was}, and this phone runs {now}. Restoring only one of the boot and system partitions may keep the phone from starting."
+                    );
+                    y = widgets::footnote(&mut c, t, f, y, &warn);
                 }
                 let (label, danger) = confirm_label(Confirm::Restore, cx.state);
                 let track = widgets::confirm(&mut c, t, f, y + t.m.dp(24.0), label, danger, s.confirm);
@@ -3058,10 +3094,10 @@ pub fn wlan(cx: &Ctx) -> Frame {
                 out.extend(hits(&joined.rows, &[Action::OpenJoined]));
                 out.push(Hit { rect: widgets::round_button(t, joined.rows[0]), action: Action::OpenJoined });
                 y = joined.bottom;
-                if let Joining::Connected(link) = &j.stage {
-                    if let Some(note) = link.reach.as_ref().and_then(|r| fmt::reach(l, r)) {
-                        y = widgets::footnote(&mut c, t, f, y, &note);
-                    }
+                if let Joining::Connected(link) = &j.stage
+                    && let Some(note) = link.reach.as_ref().and_then(|r| fmt::reach(l, r))
+                {
+                    y = widgets::footnote(&mut c, t, f, y, &note);
                 }
             }
             let others: Vec<(usize, &Network)> =
@@ -3687,12 +3723,12 @@ const MODIFIED: Text = ["修改说明", "修改說明", "Changes"];
 const NOTICE: Text = ["声明", "聲明", "Notice"];
 
 const MODIFIED_NOTE: Text = [
-    "本移植基于 Skyward 0.2.0，为小米 13 Pro（nuwa）修改。修改部分 Copyright (C) 2026 Casper Lin。\n\n\
-改动：补充 nuwa 所需的 TEE 服务链，使 /data 可以解密；新增息屏显示；屏幕键盘支持双击锁定大写；新增熄屏后的锁屏（上滑解锁，可另设数字密码）。完整记录见项目仓库的 CHANGELOG 与 docs/PATCHES.md。",
-    "本移植基於 Skyward 0.2.0，為小米 13 Pro（nuwa）修改。修改部分 Copyright (C) 2026 Casper Lin。\n\n\
-改動：補充 nuwa 所需的 TEE 服務鏈，使 /data 可以解密；新增息屏顯示；螢幕鍵盤支援雙擊鎖定大寫；新增熄屏後的鎖屏（上滑解鎖，可另設數字密碼）。完整記錄見專案倉庫的 CHANGELOG 與 docs/PATCHES.md。",
-    "This port is a modified version of Skyward 0.2.0 for the Xiaomi 13 Pro (nuwa). Modifications Copyright (C) 2026 Casper Lin.\n\n\
-The changes: the TEE service chain nuwa needs for /data to decrypt, an always-on clock, caps lock on the on-screen keyboard, and a lock screen the panel takes when it goes off (a slide to open, or a code of its own). The full record is in the project's CHANGELOG and docs/PATCHES.md.",
+    "本移植基于 Skyward 0.3.1，为小米 13 Pro（nuwa）修改，版本号 SW-v0.3.1-nuwa-v0.3.2。修改部分 Copyright (C) 2026 Casper Lin。\n\n\
+改动：补充 nuwa 所需的 TEE 服务链，使 /data 可以解密；新增息屏显示与实时磨砂锁屏；屏幕键盘支持双击锁定大写；新增密码解密页与震动反馈；在线更新指向本项目自己的发行仓库。各版详细改动见「关于本机」中的「更新日志」。",
+    "本移植基於 Skyward 0.3.1，為小米 13 Pro（nuwa）修改，版本號 SW-v0.3.1-nuwa-v0.3.2。修改部分 Copyright (C) 2026 Casper Lin。\n\n\
+改動：補充 nuwa 所需的 TEE 服務鏈，使 /data 可以解密；新增息屏顯示與即時磨砂鎖屏；螢幕鍵盤支援雙擊鎖定大寫；新增密碼解密頁與震動回饋；線上更新指向本專案自己的發行倉庫。各版詳細改動見「關於手機」中的「更新日誌」。",
+    "This port is a modified version of Skyward 0.3.1 for the Xiaomi 13 Pro (nuwa), version SW-v0.3.1-nuwa-v0.3.2. Modifications Copyright (C) 2026 Casper Lin.\n\n\
+The changes: the TEE service chain nuwa needs for /data to decrypt, an always-on clock and live frosted lock screen, caps lock on the on-screen keyboard, a passcode decrypt page with haptic feedback, and online updates pointed at this port's own release repository. The full record for each version is under Changelog in About phone.",
 ];
 
 /// Skyward's own licence.
@@ -3879,11 +3915,13 @@ pub fn systems(cx: &Ctx) -> Frame {
     let starts = starting(systems);
     let chosen = s.system_pick.unwrap_or(starts);
     let second_role = l.pick(SECOND_SYSTEM);
+    // Boot partitions that hold a second system's image nothing is kept of
+    // start neither system the page knows.
     let main = SystemCard {
         role: l.pick(MAIN_SYSTEM),
         name: &systems.installed.name,
         detail: systems.installed.version.as_deref().unwrap_or_default(),
-        mark: SystemMark::Check(chosen == Who::Installed),
+        mark: SystemMark::Check(chosen == Who::Installed && systems.held != Held::Unrecorded),
     };
     let second = match &systems.other {
         Some(other) => SystemCard { role: second_role, name: &other.name, detail: &other.version, mark: SystemMark::Check(chosen == Who::Other) },
@@ -3922,6 +3960,25 @@ pub fn systems(cx: &Ctx) -> Frame {
         "Tap a card to pick a system. Switching rewrites only the boot and init_boot partitions of the slot that starts next, and leaves the main system's other partitions as they are. The second system's files are kept in the data partition.",
     ]);
     y = widgets::footnote(&mut c, t, f, y, what);
+    match systems.held {
+        Held::Recorded => {}
+        Held::Rewritten => {
+            let note = l.pick([
+                "Skyward 写入第二系统的启动镜像之后，启动分区被改写过。选择主系统并滑动确认，会用保存的主系统启动镜像覆盖现在的内容；在此之前，安装、清除和备份都不会进行。",
+                "Skyward 寫入第二系統的啟動映像檔之後，啟動分割區被改寫過。選擇主系統並滑動確認，會用儲存的主系統啟動映像檔覆蓋現在的內容；在此之前，安裝、清除和備份都不會進行。",
+                "Something else has written the boot partitions since Skyward put the second system's boot images there. Picking the main system and sliding to confirm writes the main system's saved boot images over what is there now; until then, nothing is installed, wiped or backed up.",
+            ]);
+            y = widgets::footnote(&mut c, t, f, y, note);
+        }
+        Held::Unrecorded => {
+            let note = l.pick([
+                "启动分区里是第二系统的启动镜像，Skyward 保存的记录已经不存在，无法写回主系统的启动镜像。请重新刷入主系统的 boot 和 init_boot 镜像。",
+                "啟動分割區裡是第二系統的啟動映像檔，Skyward 儲存的記錄已經不存在，無法寫回主系統的啟動映像檔。請重新刷入主系統的 boot 和 init_boot 映像檔。",
+                "The boot partitions hold a second system's boot images, and what Skyward kept of them is gone, so it can't put the main system's back. Flash the main system's boot and init_boot images again.",
+            ]);
+            y = widgets::footnote(&mut c, t, f, y, note);
+        }
+    }
     if systems.other.is_some() && systems.changed {
         let note = l.pick([
             "安装第二系统后，主系统的 vendor_boot 或 dtbo 分区已改变，第二系统可能无法正常启动。",
